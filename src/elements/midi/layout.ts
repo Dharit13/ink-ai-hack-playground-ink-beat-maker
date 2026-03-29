@@ -8,6 +8,7 @@ export interface MidiLayout {
   headerHeight: number;
   stepWidth: number;
   stepHeight: number;
+  automationLaneBounds?: BoundingBox;
 }
 
 const OUTER_PADDING = 10;
@@ -48,6 +49,20 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: bounds.bottom - BOTTOM_PADDING,
   };
 
+  const automationLaneBounds: BoundingBox | undefined =
+    element.automationEnabled &&
+    element.automationTopY !== undefined &&
+    element.automationBottomY !== undefined &&
+    element.automationLeftX !== undefined &&
+    element.automationRightX !== undefined
+      ? {
+          left: element.automationLeftX,
+          top: element.automationTopY,
+          right: element.automationRightX,
+          bottom: element.automationBottomY,
+        }
+      : undefined;
+
   return {
     bounds,
     playButtonBounds,
@@ -55,6 +70,19 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     headerHeight,
     stepWidth: (laneBounds.right - laneBounds.left) / element.steps,
     stepHeight: laneBounds.bottom - laneBounds.top,
+    automationLaneBounds,
+  };
+}
+
+const AUTOMATION_ZONE_REACH = 200;
+
+export function getAutomationZoneBounds(element: MidiElement): BoundingBox {
+  const bounds = getMidiBounds(element);
+  return {
+    left: bounds.left,
+    top: bounds.bottom,
+    right: bounds.right,
+    bottom: bounds.bottom + AUTOMATION_ZONE_REACH,
   };
 }
 

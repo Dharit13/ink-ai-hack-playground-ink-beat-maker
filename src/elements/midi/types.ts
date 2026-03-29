@@ -12,6 +12,16 @@ export interface MidiElement extends TransformableElement {
   tempo: number;
   instrument: MidiInstrument;
   isLooping: boolean;
+  automationEnabled: boolean;
+  stepVolumes: number[];
+  // Bounds derived from the drawn U stroke
+  automationTopY?: number;
+  automationBottomY?: number;
+  automationLeftX?: number;
+  automationRightX?: number;
+  // Actual stroke paths stored so the user's handwriting is what gets rendered (not computer geometry)
+  automationUPaths?: Array<Array<{x: number; y: number}>>;
+  automationCurvePaths?: Array<Array<{x: number; y: number}>>;
 }
 
 export const DEFAULT_MIDI_STEPS = 16;
@@ -37,5 +47,7 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     tempo: DEFAULT_MIDI_TEMPO,
     instrument: DEFAULT_MIDI_INSTRUMENT,
     isLooping: false,
+    automationEnabled: false,
+    stepVolumes: Array.from({ length: DEFAULT_MIDI_STEPS }, () => 1.0),
   };
 }
