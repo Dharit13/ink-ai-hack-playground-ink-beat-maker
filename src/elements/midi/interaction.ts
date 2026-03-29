@@ -524,14 +524,21 @@ export async function acceptInk(
 ): Promise<InteractionResult> {
   debugLog.info('[MIDI] acceptInk called', { strokeCount: strokes.length });
 
-  // Check for "download" gesture — accept strokes anywhere in the padded zone around the element
   const normalized = normalizeMidiElement(element);
   const midiMainBounds = getMidiBounds(normalized);
   const downloadZone = getDownloadZoneBounds(element);
+  const layout = getMidiLayout(normalized);
+  const automationZone = getAutomationZoneBounds(normalized);
+  const mode = normalized.inputMode ?? 'tap';
 
   const strokesInDownloadZone = strokes.some((stroke) => {
     const bounds = getStrokeBounds(stroke);
     return bounds ? boundingBoxesOverlap(downloadZone, bounds) : false;
+  });
+
+  const strokesInAutomationZone = strokes.some((stroke) => {
+    const bounds = getStrokeBounds(stroke);
+    return bounds ? boundingBoxesOverlap(automationZone, bounds) : false;
   });
 
   // Check if ALL strokes are outside the main MIDI element bounds
@@ -543,55 +550,16 @@ export async function acceptInk(
 
   debugLog.info('[MIDI] acceptInk zone checks', {
     strokesInDownloadZone,
+    strokesInAutomationZone,
     allStrokesOutsideMain,
     strokeCount: strokes.length,
   });
-
-  if (strokesInDownloadZone && strokes.length >= 2) {
-    // Only attempt download recognition with 2+ strokes (a single stroke can't form "dl" or "download")
-    debugLog.info('[MIDI] Attempting download recognition', {
-      strokeCount: strokes.length,
-    });
-    let recog = recognitionResult;
-    if (!recog) {
-      try {
-        recog = await getRecognitionService().recognizeGoogle(strokes);
-        debugLog.info('[MIDI] Recognition result for download', {
-          rawText: recog?.rawText,
-          lineCount: recog?.lines?.length,
-        });
-      } catch (err) {
-        debugLog.warn('[MIDI] Recognition FAILED for download check', err);
-      }
-    }
-    const isDownload = isDownloadGesture(recog);
-    debugLog.info('[MIDI] Download gesture check', { isDownload, rawText: recog?.rawText });
-    if (isDownload) {
-      debugLog.info('[MIDI] EXPORTING MIDI FILE');
-      exportMidiFile(element);
-      return { element, consumed: true, strokesConsumed: strokes };
-    }
-  }
-
-  // If strokes are outside the main MIDI element (e.g., writing near it),
-  // don't consume them — let them buffer for batch processing (e.g., multi-stroke "dl")
-  if (allStrokesOutsideMain && strokesInDownloadZone) {
-    debugLog.info('[MIDI] Strokes outside main bounds, not consuming (buffering for text recognition)');
-    return { element: normalized, consumed: false, strokesConsumed: [] };
-  }
-
-  const layout = getMidiLayout(normalized);
-  const mode = normalized.inputMode ?? 'tap';
 
   if (strokes.length === 1) {
     const stroke = strokes[0];
     const center = getStrokeCenter(stroke);
 
-    if (
-      center &&
-      isTapStroke(stroke) &&
-      pointInBounds(center, layout.tapTempoButtonBounds)
-    ) {
+    if (center && pointInBounds(center, layout.tapTempoButtonBounds)) {
       return {
         element: applyTapTempo(normalized, Date.now()),
         consumed: true,
@@ -715,7 +683,6 @@ export async function acceptInk(
   });
 
   if (allStrokesBelowMain) {
-    const automationZone = getAutomationZoneBounds(normalized);
     const strokesInZone = strokes.filter((stroke) => {
       const bounds = getStrokeBounds(stroke);
       return bounds ? boundingBoxesOverlap(automationZone, bounds) : false;
@@ -750,6 +717,38 @@ export async function acceptInk(
         strokesConsumed: strokesInZone,
       };
     }
+  }
+
+  if (strokesInDownloadZone && !strokesInAutomationZone && strokes.length >= 2) {
+    // Only attempt download recognition with 2+ strokes (a single stroke can't form "dl" or "download")
+    debugLog.info('[MIDI] Attempting download recognition', {
+      strokeCount: strokes.length,
+    });
+    let recog = recognitionResult;
+    if (!recog) {
+      try {
+        recog = await getRecognitionService().recognizeGoogle(strokes);
+        debugLog.info('[MIDI] Recognition result for download', {
+          rawText: recog?.rawText,
+          lineCount: recog?.lines?.length,
+        });
+      } catch (err) {
+        debugLog.warn('[MIDI] Recognition FAILED for download check', err);
+      }
+    }
+    const isDownload = isDownloadGesture(recog);
+    debugLog.info('[MIDI] Download gesture check', { isDownload, rawText: recog?.rawText });
+    if (isDownload) {
+      debugLog.info('[MIDI] EXPORTING MIDI FILE');
+      exportMidiFile(element);
+      return { element, consumed: true, strokesConsumed: strokes };
+    }
+  }
+
+  // Let nearby download handwriting continue buffering, but never suppress automation gestures.
+  if (allStrokesOutsideMain && strokesInDownloadZone && !strokesInAutomationZone) {
+    debugLog.info('[MIDI] Strokes outside main bounds, not consuming (buffering for text recognition)');
+    return { element: normalized, consumed: false, strokesConsumed: [] };
   }
 
   const targets = getTargetCells(normalized, strokes);
