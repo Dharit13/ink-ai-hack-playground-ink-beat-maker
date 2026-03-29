@@ -1,19 +1,26 @@
 // TicTacToe creator - recognizes "#" pattern and creates playable game
+//
 
-import type { Stroke } from '../../types';
-import type { Offset } from '../../types/primitives';
-import type { TicTacToeCell } from './types';
+import type { Stroke } from "../../types";
+import type { Offset } from "../../types/primitives";
+import type { TicTacToeCell } from "./types";
+import { TicTacToePiece, createEmptyTicTacToeElement } from "./types";
+import { getStrokeBoundingBox } from "../../types/brush";
+import type {
+  CreationContext,
+  CreationResult,
+} from "../registry/ElementPlugin";
+import type { HandwritingRecognitionResult } from "../../recognition/RecognitionService";
 import {
-  TicTacToePiece,
-  createEmptyTicTacToeElement,
-} from './types';
-import { getStrokeBoundingBox } from '../../types/brush';
-import type { CreationContext, CreationResult } from '../registry/ElementPlugin';
-import type { HandwritingRecognitionResult } from '../../recognition/RecognitionService';
-import { chatCompletionJSON, isOpenRouterConfigured } from '../../ai/OpenRouterService';
-import { debugLog } from '../../debug/DebugLogger';
-import type { Line } from '../../geometry/lineIntersection';
-import { lineSegmentIntersection, lineAngle } from '../../geometry/lineIntersection';
+  chatCompletionJSON,
+  isOpenRouterConfigured,
+} from "../../ai/OpenRouterService";
+import { debugLog } from "../../debug/DebugLogger";
+import type { Line } from "../../geometry/lineIntersection";
+import {
+  lineSegmentIntersection,
+  lineAngle,
+} from "../../geometry/lineIntersection";
 
 // Validation constants
 const MIN_STROKES = 4;
@@ -77,7 +84,7 @@ function classifyStrokeLine(stroke: Stroke): StrokeLine | null {
  */
 function findGridIntersections(
   horizontalLines: StrokeLine[],
-  verticalLines: StrokeLine[]
+  verticalLines: StrokeLine[],
 ): [Offset, Offset, Offset, Offset] | null {
   if (horizontalLines.length !== 2 || verticalLines.length !== 2) {
     return null;
@@ -126,7 +133,7 @@ function findGridIntersections(
 function createCellsFromIntersections(
   intersections: [Offset, Offset, Offset, Offset],
   horizontalLines: StrokeLine[],
-  verticalLines: StrokeLine[]
+  verticalLines: StrokeLine[],
 ): TicTacToeCell[] {
   const [topLeft, topRight, bottomLeft, bottomRight] = intersections;
 
@@ -151,24 +158,79 @@ function createCellsFromIntersections(
   const cells: TicTacToeCell[] = [];
 
   // Row 0: cells 0, 1, 2
-  cells.push(createCell(gridTopLeft, { x: topLeft.x, y: minY }, topLeft, { x: minX, y: topLeft.y }));
-  cells.push(createCell({ x: topLeft.x, y: minY }, { x: topRight.x, y: minY }, topRight, topLeft));
-  cells.push(createCell({ x: topRight.x, y: minY }, gridTopRight, { x: maxX, y: topRight.y }, topRight));
+  cells.push(
+    createCell(gridTopLeft, { x: topLeft.x, y: minY }, topLeft, {
+      x: minX,
+      y: topLeft.y,
+    }),
+  );
+  cells.push(
+    createCell(
+      { x: topLeft.x, y: minY },
+      { x: topRight.x, y: minY },
+      topRight,
+      topLeft,
+    ),
+  );
+  cells.push(
+    createCell(
+      { x: topRight.x, y: minY },
+      gridTopRight,
+      { x: maxX, y: topRight.y },
+      topRight,
+    ),
+  );
 
   // Row 1: cells 3, 4, 5
-  cells.push(createCell({ x: minX, y: topLeft.y }, topLeft, bottomLeft, { x: minX, y: bottomLeft.y }));
+  cells.push(
+    createCell({ x: minX, y: topLeft.y }, topLeft, bottomLeft, {
+      x: minX,
+      y: bottomLeft.y,
+    }),
+  );
   cells.push(createCell(topLeft, topRight, bottomRight, bottomLeft));
-  cells.push(createCell(topRight, { x: maxX, y: topRight.y }, { x: maxX, y: bottomRight.y }, bottomRight));
+  cells.push(
+    createCell(
+      topRight,
+      { x: maxX, y: topRight.y },
+      { x: maxX, y: bottomRight.y },
+      bottomRight,
+    ),
+  );
 
   // Row 2: cells 6, 7, 8
-  cells.push(createCell({ x: minX, y: bottomLeft.y }, bottomLeft, { x: bottomLeft.x, y: maxY }, gridBottomLeft));
-  cells.push(createCell(bottomLeft, bottomRight, { x: bottomRight.x, y: maxY }, { x: bottomLeft.x, y: maxY }));
-  cells.push(createCell(bottomRight, { x: maxX, y: bottomRight.y }, gridBottomRight, { x: bottomRight.x, y: maxY }));
+  cells.push(
+    createCell(
+      { x: minX, y: bottomLeft.y },
+      bottomLeft,
+      { x: bottomLeft.x, y: maxY },
+      gridBottomLeft,
+    ),
+  );
+  cells.push(
+    createCell(
+      bottomLeft,
+      bottomRight,
+      { x: bottomRight.x, y: maxY },
+      { x: bottomLeft.x, y: maxY },
+    ),
+  );
+  cells.push(
+    createCell(bottomRight, { x: maxX, y: bottomRight.y }, gridBottomRight, {
+      x: bottomRight.x,
+      y: maxY,
+    }),
+  );
 
   return cells;
 }
 
-function createCell(topLeft: Offset, topRight: Offset, bottomRight: Offset, bottomLeft: Offset): TicTacToeCell {
+function createCell(
+  topLeft: Offset,
+  topRight: Offset,
+  bottomRight: Offset,
+  bottomLeft: Offset,
+): TicTacToeCell {
   return {
     quad: { topLeft, topRight, bottomRight, bottomLeft },
     piece: TicTacToePiece.EMPTY,
@@ -178,7 +240,11 @@ function createCell(topLeft: Offset, topRight: Offset, bottomRight: Offset, bott
 /**
  * Validate the overall bounds of the strokes for a TicTacToe grid.
  */
-function validateBounds(strokes: Stroke[]): { valid: boolean; width: number; height: number } {
+function validateBounds(strokes: Stroke[]): {
+  valid: boolean;
+  width: number;
+  height: number;
+} {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -213,12 +279,23 @@ function validateBounds(strokes: Stroke[]): { valid: boolean; width: number; hei
  * Try all possible ways to pair 4 lines into 2 groups of 2,
  * and find valid intersections.
  */
-function tryAllPairings(strokeLines: StrokeLine[]): [Offset, Offset, Offset, Offset] | null {
+function tryAllPairings(
+  strokeLines: StrokeLine[],
+): [Offset, Offset, Offset, Offset] | null {
   // Generate all ways to split 4 items into 2 groups of 2
   const pairings = [
-    [[0, 1], [2, 3]],
-    [[0, 2], [1, 3]],
-    [[0, 3], [1, 2]],
+    [
+      [0, 1],
+      [2, 3],
+    ],
+    [
+      [0, 2],
+      [1, 3],
+    ],
+    [
+      [0, 3],
+      [1, 2],
+    ],
   ];
 
   for (const pairing of pairings) {
@@ -262,7 +339,11 @@ function strokesToPolylines(strokes: Stroke[]): number[][][] {
     // Always include the last point
     const last = inputs[inputs.length - 1];
     const lastPoint = [Math.round(last.x), Math.round(last.y)];
-    if (points.length === 0 || points[points.length - 1][0] !== lastPoint[0] || points[points.length - 1][1] !== lastPoint[1]) {
+    if (
+      points.length === 0 ||
+      points[points.length - 1][0] !== lastPoint[0] ||
+      points[points.length - 1][1] !== lastPoint[1]
+    ) {
       points.push(lastPoint);
     }
     return points;
@@ -272,9 +353,13 @@ function strokesToPolylines(strokes: Stroke[]): number[][][] {
 /**
  * Use an LLM via OpenRouter to determine if strokes form a "#" / tic-tac-toe grid.
  */
-async function tryLLMRecognition(strokes: Stroke[]): Promise<HashRecognitionResult | null> {
+async function tryLLMRecognition(
+  strokes: Stroke[],
+): Promise<HashRecognitionResult | null> {
   if (!isOpenRouterConfigured()) {
-    debugLog.info('TicTacToe: OpenRouter not configured, skipping LLM recognition');
+    debugLog.info(
+      "TicTacToe: OpenRouter not configured, skipping LLM recognition",
+    );
     return null;
   }
 
@@ -283,26 +368,30 @@ async function tryLLMRecognition(strokes: Stroke[]): Promise<HashRecognitionResu
     const result = await chatCompletionJSON<HashRecognitionResult>(
       [
         {
-          role: 'system',
+          role: "system",
           content:
             'Do these pen strokes form a "#" (tic-tac-toe grid)? ' +
-            'Strokes are polylines of [x,y]. ' +
+            "Strokes are polylines of [x,y]. " +
             'Reply JSON: {"isHash":bool,"confidence":0-1,"reasoning":"…"}',
         },
         {
-          role: 'user',
+          role: "user",
           content: JSON.stringify(polylines),
         },
       ],
-      { model: 'google/gemini-2.0-flash-lite-001', temperature: 0, maxTokens: 80 },
+      {
+        model: "google/gemini-2.0-flash-lite-001",
+        temperature: 0,
+        maxTokens: 80,
+      },
     );
 
     // Some models wrap JSON responses in an array — unwrap if needed
     const unwrapped = Array.isArray(result) ? result[0] : result;
-    debugLog.info('TicTacToe: LLM recognition result', unwrapped);
+    debugLog.info("TicTacToe: LLM recognition result", unwrapped);
     return unwrapped;
   } catch (error) {
-    debugLog.warn('TicTacToe: LLM recognition failed', error);
+    debugLog.warn("TicTacToe: LLM recognition failed", error);
     return null;
   }
 }
@@ -313,14 +402,22 @@ async function tryLLMRecognition(strokes: Stroke[]): Promise<HashRecognitionResu
 export function canCreate(strokes: Stroke[]): boolean {
   // Quick check: must have exactly 4 strokes
   if (strokes.length < MIN_STROKES || strokes.length > MAX_STROKES) {
-    debugLog.info('TicTacToe canCreate: wrong stroke count', { count: strokes.length, required: 4 });
+    debugLog.info("TicTacToe canCreate: wrong stroke count", {
+      count: strokes.length,
+      required: 4,
+    });
     return false;
   }
 
   // Check bounds
   const { valid, width, height } = validateBounds(strokes);
   if (!valid) {
-    debugLog.info('TicTacToe canCreate: invalid bounds', { width: Math.round(width), height: Math.round(height), minSize: MIN_SIZE, maxSize: MAX_SIZE });
+    debugLog.info("TicTacToe canCreate: invalid bounds", {
+      width: Math.round(width),
+      height: Math.round(height),
+      minSize: MIN_SIZE,
+      maxSize: MAX_SIZE,
+    });
   }
   return valid;
 }
@@ -331,20 +428,23 @@ export function canCreate(strokes: Stroke[]): boolean {
 export async function createFromInk(
   strokes: Stroke[],
   _context: CreationContext,
-  _recognitionResult?: HandwritingRecognitionResult
+  _recognitionResult?: HandwritingRecognitionResult,
 ): Promise<CreationResult | null> {
-  debugLog.info('TicTacToe createFromInk', { strokeCount: strokes.length });
+  debugLog.info("TicTacToe createFromInk", { strokeCount: strokes.length });
 
   // Validate stroke count
   if (strokes.length !== 4) {
-    debugLog.warn('TicTacToe: wrong stroke count', { count: strokes.length });
+    debugLog.warn("TicTacToe: wrong stroke count", { count: strokes.length });
     return null;
   }
 
   // Validate bounds
   const { valid, width, height } = validateBounds(strokes);
   if (!valid) {
-    debugLog.warn('TicTacToe: invalid bounds', { width: Math.round(width), height: Math.round(height) });
+    debugLog.warn("TicTacToe: invalid bounds", {
+      width: Math.round(width),
+      height: Math.round(height),
+    });
     return null;
   }
 
@@ -354,14 +454,17 @@ export async function createFromInk(
     .filter((sl): sl is StrokeLine => sl !== null);
 
   if (strokeLines.length !== 4) {
-    debugLog.warn('TicTacToe: could not classify all strokes as lines');
+    debugLog.warn("TicTacToe: could not classify all strokes as lines");
     return null;
   }
 
   const horizontalLines = strokeLines.filter((sl) => sl.isHorizontal);
   const verticalLines = strokeLines.filter((sl) => sl.isVertical);
 
-  debugLog.info('TicTacToe: line classification', { horizontal: horizontalLines.length, vertical: verticalLines.length });
+  debugLog.info("TicTacToe: line classification", {
+    horizontal: horizontalLines.length,
+    vertical: verticalLines.length,
+  });
 
   // Cache LLM result so we don't call twice (once for fallback, once for confidence)
   let llmResult: HashRecognitionResult | null = null;
@@ -370,11 +473,13 @@ export async function createFromInk(
   // Must have exactly 2 horizontal and 2 vertical lines
   if (horizontalLines.length !== 2 || verticalLines.length !== 2) {
     // Could be slightly angled - try LLM recognition to confirm "#"
-    debugLog.info('TicTacToe: not 2+2 lines, trying LLM recognition');
+    debugLog.info("TicTacToe: not 2+2 lines, trying LLM recognition");
     llmResult = await tryLLMRecognition(strokes);
     llmCalled = true;
     if (!llmResult || !llmResult.isHash || llmResult.confidence < 0.7) {
-      debugLog.warn('TicTacToe: LLM recognition did not confirm hash', { llmResult });
+      debugLog.warn("TicTacToe: LLM recognition did not confirm hash", {
+        llmResult,
+      });
       return null;
     }
   }
@@ -389,16 +494,16 @@ export async function createFromInk(
 
   if (!intersections) {
     // Try all possible 2x2 pairings
-    debugLog.info('TicTacToe: trying all pairings for intersections');
+    debugLog.info("TicTacToe: trying all pairings for intersections");
     intersections = tryAllPairings(strokeLines);
   }
 
   if (!intersections) {
-    debugLog.warn('TicTacToe: could not find 4 intersections');
+    debugLog.warn("TicTacToe: could not find 4 intersections");
     return null;
   }
 
-  debugLog.info('TicTacToe: found intersections');
+  debugLog.info("TicTacToe: found intersections");
 
   // LLM recognition is optional - geometric detection is sufficient
   // We use it as a confidence hint, not a hard requirement
@@ -409,10 +514,15 @@ export async function createFromInk(
   if (llmResult) {
     if (llmResult.isHash && llmResult.confidence >= 0.7) {
       confidence = 0.95;
-      debugLog.info('TicTacToe: LLM confirmed hash', { reasoning: llmResult.reasoning });
+      debugLog.info("TicTacToe: LLM confirmed hash", {
+        reasoning: llmResult.reasoning,
+      });
     } else if (!llmResult.isHash) {
       confidence = 0.8;
-      debugLog.info('TicTacToe: LLM did not confirm hash, proceeding with geometric detection', { reasoning: llmResult.reasoning });
+      debugLog.info(
+        "TicTacToe: LLM did not confirm hash, proceeding with geometric detection",
+        { reasoning: llmResult.reasoning },
+      );
     }
   }
 
@@ -420,7 +530,7 @@ export async function createFromInk(
   const cells = createCellsFromIntersections(
     intersections,
     horizontalLines.length === 2 ? horizontalLines : strokeLines.slice(0, 2),
-    verticalLines.length === 2 ? verticalLines : strokeLines.slice(2, 4)
+    verticalLines.length === 2 ? verticalLines : strokeLines.slice(2, 4),
   );
 
   const element = createEmptyTicTacToeElement(strokes, intersections, cells);

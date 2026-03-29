@@ -42,7 +42,7 @@ npm run lint     # ESLint check
 npm run preview  # Preview production build locally
 ```
 
-The dev server is exposed on all network interfaces. The terminal output will show your network URL (e.g. `http://<your-ip>:5173`) that other devices on the same network can use to access the app.
+The dev server is exposed on all network interfaces. The terminal output will show your network URL (e.g. "https://ink-ai-hack-playground-ink-beat-mak.vercel.app/") that other devices on the same network can use to access the app.
 
 ### How It Works
 Draw on the canvas with a pointer device. Strokes are captured, clustered,

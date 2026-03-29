@@ -1,7 +1,7 @@
 import type { BoundingBox, Offset, Stroke } from '../../types';
 import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlugin';
 import type { MidiElement, MidiInputMode, StepVelocity } from './types';
-import { getMidiBounds, getMidiLayout, getMidiStepBounds } from './layout';
+import { getAutomationZoneBounds, getMidiBounds, getMidiLayout, getMidiStepBounds } from './layout';
 import { primeMidiAudio } from './renderer';
 
 const TAP_DISTANCE_THRESHOLD = 12;
@@ -179,7 +179,46 @@ export function isInterestedIn(
   _strokes: Stroke[],
   strokeBounds: BoundingBox
 ): boolean {
-  return boundingBoxesOverlap(getMidiBounds(element), strokeBounds);
+  return (
+    boundingBoxesOverlap(getMidiBounds(element), strokeBounds) ||
+    boundingBoxesOverlap(getAutomationZoneBounds(element), strokeBounds)
+  );
+}
+
+function getStepVolumesFromStrokes(
+  element: MidiElement,
+  strokes: Stroke[],
+  automationLaneBounds: BoundingBox
+): number[] {
+  const laneTop = automationLaneBounds.top;
+  const laneHeight = automationLaneBounds.bottom - laneTop;
+  const laneWidth = automationLaneBounds.right - automationLaneBounds.left;
+  const stepWidth = laneWidth / element.steps;
+  const updatedVolumes = [...element.stepVolumes];
+
+  for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
+    const stepLeft = automationLaneBounds.left + stepIndex * stepWidth;
+    const stepRight = stepLeft + stepWidth;
+
+    let minY: number | null = null;
+
+    for (const stroke of strokes) {
+      for (const point of stroke.inputs.inputs) {
+        if (point.x >= stepLeft && point.x < stepRight) {
+          if (minY === null || point.y < minY) {
+            minY = point.y;
+          }
+        }
+      }
+    }
+
+    if (minY !== null) {
+      const volume = Math.max(0, Math.min(1, 1.0 - (minY - laneTop) / laneHeight));
+      updatedVolumes[stepIndex] = volume;
+    }
+  }
+
+  return updatedVolumes;
 }
 
 export async function acceptInk(
@@ -189,6 +228,77 @@ export async function acceptInk(
   const layout = getMidiLayout(element);
   const mode: MidiInputMode = element.inputMode ?? 'tap';
   const velocities = [...((element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[])];
+
+  const midiMainBounds = getMidiBounds(element);
+  const automationZone = getAutomationZoneBounds(element);
+
+  // Check if all strokes are entirely below the main MIDI element (automation creation gesture)
+  const allStrokesBelow = strokes.every((stroke) => {
+    const bounds = getStrokeBounds(stroke);
+    return bounds ? bounds.top >= midiMainBounds.bottom : false;
+  });
+
+  if (allStrokesBelow) {
+    // Strokes in automation lane (already enabled) → update volumes
+    if (element.automationEnabled && layout.automationLaneBounds) {
+      const strokesInLane = strokes.filter((stroke) => {
+        const bounds = getStrokeBounds(stroke);
+        return bounds ? boundingBoxesOverlap(layout.automationLaneBounds!, bounds) : false;
+      });
+
+      if (strokesInLane.length > 0) {
+        // Reset to flat 1.0 then apply new strokes — only one curve at a time
+        const cleared = { ...element, stepVolumes: Array.from({ length: element.steps }, () => 1.0) };
+        const updatedVolumes = getStepVolumesFromStrokes(cleared, strokesInLane, layout.automationLaneBounds);
+        // Store the actual stroke paths so the user's handwriting is rendered, not computer geometry
+        const curvePaths = strokesInLane.map(s => s.inputs.inputs.map(p => ({ x: p.x, y: p.y })));
+        return {
+          element: { ...element, stepVolumes: updatedVolumes, automationCurvePaths: curvePaths },
+          consumed: true,
+          strokesConsumed: strokesInLane,
+        };
+      }
+    }
+
+    // Any strokes in the automation zone → enable automation lane
+    // Use the bounding box of those strokes as the automation lane bounds
+    const strokesInZone = strokes.filter((stroke) => {
+      const bounds = getStrokeBounds(stroke);
+      return bounds ? boundingBoxesOverlap(automationZone, bounds) : false;
+    });
+
+    if (strokesInZone.length > 0) {
+      // Compute the height the user intended from the raw stroke bounds
+      let strokeTop = Infinity, strokeBottom = -Infinity;
+      for (const stroke of strokesInZone) {
+        const b = getStrokeBounds(stroke);
+        if (!b) continue;
+        strokeTop = Math.min(strokeTop, b.top);
+        strokeBottom = Math.max(strokeBottom, b.bottom);
+      }
+      const drawnHeight = strokeBottom - strokeTop;
+
+      // Snap left/right to the MIDI lane edges, and top to the MIDI element's bottom
+      // so the box aligns cleanly with the sequencer above it.
+      // Height is preserved from what the user drew.
+      const snappedTop = midiMainBounds.bottom;
+      return {
+        element: {
+          ...element,
+          automationEnabled: true,
+          stepVolumes: Array.from({ length: element.steps }, () => 1.0),
+          automationTopY: snappedTop,
+          automationBottomY: snappedTop + drawnHeight,
+          automationLeftX: layout.laneBounds.left,
+          automationRightX: layout.laneBounds.right,
+          automationUPaths: undefined,
+          automationCurvePaths: undefined,
+        },
+        consumed: true,
+        strokesConsumed: strokesInZone,
+      };
+    }
+  }
 
   if (strokes.length === 1) {
     const center = getStrokeCenter(strokes[0]);

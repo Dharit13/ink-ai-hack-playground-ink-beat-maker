@@ -38,12 +38,18 @@ const VELOCITY_GAIN: Record<StepVelocity, number> = {
   high: 0.4,
 };
 
-function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal'): void {
+function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal', stepIndex = -1): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
 
   const peakGain = VELOCITY_GAIN[velocity];
   if (peakGain === 0) return;
+
+  const automationVolume =
+    element.automationEnabled && stepIndex >= 0
+      ? (element.stepVolumes?.[stepIndex] ?? 1.0)
+      : 1.0;
+  const effectiveGain = peakGain * automationVolume;
 
   const now = context.currentTime;
   const oscillator = context.createOscillator();
@@ -59,7 +65,7 @@ function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal'):
   filter.Q.setValueAtTime(0.8, now);
 
   gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(peakGain, now + 0.005);
+  gainNode.gain.exponentialRampToValueAtTime(effectiveGain, now + 0.005);
   gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
 
   oscillator.connect(filter);
@@ -102,12 +108,12 @@ function syncPlayback(element: MidiElement, now: number): number | null {
     if (mode === 'tick') {
       const vel = velocities[stepIndex];
       if (vel !== 'off') {
-        playStepSound(element, vel);
+        playStepSound(element, vel, stepIndex);
       }
     } else {
       if (element.activeSteps[stepIndex]) {
         const vel = velocities[stepIndex] !== 'off' ? velocities[stepIndex] : 'normal';
-        playStepSound(element, vel);
+        playStepSound(element, vel, stepIndex);
       }
     }
   }
@@ -184,6 +190,10 @@ export function render(
   renderPlayButton(ctx, layout.playButtonBounds, element.isLooping);
   renderModeToggle(ctx, layout.toggleModeBounds, mode);
   renderLane(ctx, element, layout, currentStep, mode, velocities);
+
+  if (element.automationEnabled && layout.automationLaneBounds) {
+    renderAutomationLane(ctx, element, layout);
+  }
 
   ctx.restore();
 }
@@ -321,6 +331,67 @@ function renderLane(
   ctx.restore();
 }
 
+function replayPaths(
+  ctx: CanvasRenderingContext2D,
+  paths: Array<Array<{x: number; y: number}>>
+): void {
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    ctx.stroke();
+  }
+}
+
+function renderAutomationLane(
+  ctx: CanvasRenderingContext2D,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>
+): void {
+  const lane = layout.automationLaneBounds!;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.5;
+
+  // Snapped U border — left/right/bottom aligned to MIDI lane, clean lines
+  ctx.beginPath();
+  ctx.moveTo(lane.left, lane.top);
+  ctx.lineTo(lane.left, lane.bottom);
+  ctx.lineTo(lane.right, lane.bottom);
+  ctx.lineTo(lane.right, lane.top);
+  ctx.stroke();
+
+  // Replay the user's actual curve stroke exactly as drawn — no snapping on this
+  if (element.automationCurvePaths) {
+    replayPaths(ctx, element.automationCurvePaths);
+  }
+
+  // VOL indicator — sits just inside the top-left corner of the automation lane
+  const indicatorW = 36;
+  const indicatorH = 20;
+  const indicatorX = lane.left + 4;
+  const indicatorY = lane.top + 4;
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+
+  ctx.restore();
+}
+
 export function getBounds(element: MidiElement): BoundingBox | null {
-  return getMidiBounds(element);
+  const bounds = getMidiBounds(element);
+  if (!element.automationEnabled || element.automationBottomY === undefined) return bounds;
+  return {
+    ...bounds,
+    bottom: element.automationBottomY,
+  };
 }
