@@ -14,6 +14,40 @@ let seenThisFrame = new Set<string>();
 
 let audioContext: AudioContext | null = null;
 
+// ── Reverb (FX Knob integration) ─────────────────────────────────────────────
+// Maps midiElementId → reverb wet amount (0-1). Written by fxknob plugin.
+const midiReverbCache = new Map<string, number>();
+let reverbBuffer: AudioBuffer | null = null;
+
+/**
+ * Set the reverb amount for a MIDI element (called by the FX knob renderer/interaction).
+ */
+export function setMidiReverb(midiId: string, amount: number): void {
+  midiReverbCache.set(midiId, Math.max(0, Math.min(1, amount)));
+}
+
+function getMidiReverb(midiId: string): number {
+  return midiReverbCache.get(midiId) ?? 0;
+}
+
+/**
+ * Generate a synthetic reverb impulse response (exponential-decay white noise).
+ */
+function getReverbBuffer(context: AudioContext): AudioBuffer {
+  if (reverbBuffer) return reverbBuffer;
+  const duration = 2.0;
+  const decay = 2.0;
+  const length = Math.floor(context.sampleRate * duration);
+  reverbBuffer = context.createBuffer(2, length, context.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = reverbBuffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return reverbBuffer;
+}
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (audioContext) return audioContext;
@@ -70,7 +104,21 @@ function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal', 
 
   oscillator.connect(filter);
   filter.connect(gainNode);
-  gainNode.connect(context.destination);
+
+  // Reverb wet/dry mix — driven by any connected FX knob
+  const reverbAmount = getMidiReverb(element.id);
+  if (reverbAmount > 0) {
+    const convolver = context.createConvolver();
+    convolver.buffer = getReverbBuffer(context);
+    const wetGain = context.createGain();
+    wetGain.gain.setValueAtTime(reverbAmount, now);
+    gainNode.connect(context.destination);   // dry path
+    gainNode.connect(wetGain);
+    wetGain.connect(convolver);
+    convolver.connect(context.destination);  // wet path
+  } else {
+    gainNode.connect(context.destination);
+  }
 
   oscillator.start(now);
   oscillator.stop(now + 0.13);
