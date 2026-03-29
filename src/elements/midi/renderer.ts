@@ -5,7 +5,9 @@ import {
   MIDI_LANE_INSTRUMENTS,
   normalizeMidiElement,
   type MidiElement,
+  type MidiInputMode,
   type MidiInstrument,
+  type StepVelocity,
 } from './types';
 import { getMidiBounds, getMidiInteractionBounds, getMidiLayout } from './layout';
 
@@ -24,6 +26,12 @@ let compressorNode: DynamicsCompressorNode | null = null;
 let noiseBuffer: AudioBuffer | null = null;
 
 const MASTER_OUTPUT_GAIN = 1.9;
+const VELOCITY_GAIN: Record<StepVelocity, number> = {
+  off: 0,
+  low: 0.12,
+  normal: 0.24,
+  high: 0.4,
+};
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -80,34 +88,108 @@ function getInstrumentSoundProfile(instrument: MidiInstrument): {
   frequency: number;
   endFrequency: number;
   filterFrequency: number;
-  gain: number;
   duration: number;
   type: OscillatorType;
 } {
   switch (instrument) {
     case 'kick':
-      return { frequency: 120, endFrequency: 48, filterFrequency: 240, gain: 0.5, duration: 0.18, type: 'sine' };
+      return { frequency: 120, endFrequency: 48, filterFrequency: 240, duration: 0.18, type: 'sine' };
     case 'snare':
-      return { frequency: 220, endFrequency: 130, filterFrequency: 1800, gain: 0.32, duration: 0.12, type: 'triangle' };
+      return { frequency: 220, endFrequency: 130, filterFrequency: 1800, duration: 0.12, type: 'triangle' };
     case 'closedHat':
-      return { frequency: 520, endFrequency: 440, filterFrequency: 5000, gain: 0.15, duration: 0.05, type: 'square' };
+      return { frequency: 520, endFrequency: 440, filterFrequency: 5000, duration: 0.05, type: 'square' };
     case 'openHat':
-      return { frequency: 540, endFrequency: 420, filterFrequency: 4200, gain: 0.14, duration: 0.12, type: 'square' };
+      return { frequency: 540, endFrequency: 420, filterFrequency: 4200, duration: 0.12, type: 'square' };
     case 'tom':
-      return { frequency: 170, endFrequency: 98, filterFrequency: 700, gain: 0.28, duration: 0.16, type: 'triangle' };
+      return { frequency: 170, endFrequency: 98, filterFrequency: 700, duration: 0.16, type: 'triangle' };
     case 'midTom':
-      return { frequency: 145, endFrequency: 85, filterFrequency: 600, gain: 0.28, duration: 0.16, type: 'triangle' };
+      return { frequency: 145, endFrequency: 85, filterFrequency: 600, duration: 0.16, type: 'triangle' };
     case 'crash':
-      return { frequency: 460, endFrequency: 330, filterFrequency: 3200, gain: 0.18, duration: 0.2, type: 'sawtooth' };
+      return { frequency: 460, endFrequency: 330, filterFrequency: 3200, duration: 0.2, type: 'sawtooth' };
   }
 }
 
-function playLaneSound(instrument: MidiInstrument): void {
+function playNoiseInstrument(
+  context: AudioContext,
+  instrument: MidiInstrument,
+  effectiveGain: number
+): void {
+  const noise = context.createBufferSource();
+  noise.buffer = getNoiseBuffer(context);
+
+  const noiseFilter = context.createBiquadFilter();
+  const noiseGain = context.createGain();
+  const outputNode = getOutputNode(context);
+  const now = context.currentTime;
+
+  noiseFilter.type = instrument === 'snare' ? 'highpass' : 'bandpass';
+
+  switch (instrument) {
+    case 'snare':
+      noiseFilter.frequency.setValueAtTime(1800, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.6 * effectiveGain, now + 0.003);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      break;
+    case 'closedHat':
+      noiseFilter.frequency.setValueAtTime(7000, now);
+      noiseFilter.Q.setValueAtTime(2.5, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.34 * effectiveGain, now + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+      break;
+    case 'openHat':
+      noiseFilter.frequency.setValueAtTime(5200, now);
+      noiseFilter.Q.setValueAtTime(1.6, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.28 * effectiveGain, now + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+      break;
+    case 'crash':
+      noiseFilter.frequency.setValueAtTime(3600, now);
+      noiseFilter.Q.setValueAtTime(1.1, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.32 * effectiveGain, now + 0.003);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      break;
+  }
+
+  noise.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(outputNode);
+  noise.start(now);
+  noise.stop(now + 0.3);
+
+  if (instrument === 'snare') {
+    const snapOsc = context.createOscillator();
+    const snapGain = context.createGain();
+    snapOsc.type = 'triangle';
+    snapOsc.frequency.setValueAtTime(180, now);
+    snapOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+    snapGain.gain.setValueAtTime(0.0001, now);
+    snapGain.gain.exponentialRampToValueAtTime(0.22 * effectiveGain, now + 0.002);
+    snapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    snapOsc.connect(snapGain);
+    snapGain.connect(outputNode);
+    snapOsc.start(now);
+    snapOsc.stop(now + 0.1);
+  }
+}
+
+function playLaneSound(
+  instrument: MidiInstrument,
+  velocity: StepVelocity,
+  volume = 1,
+): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
 
+  const velocityGain = VELOCITY_GAIN[velocity];
+  if (velocityGain <= 0) return;
+  const effectiveGain = velocityGain * volume;
+
   if (instrument === 'snare' || instrument === 'closedHat' || instrument === 'openHat' || instrument === 'crash') {
-    playNoiseInstrument(context, instrument);
+    playNoiseInstrument(context, instrument, effectiveGain);
     return;
   }
 
@@ -127,7 +209,7 @@ function playLaneSound(instrument: MidiInstrument): void {
   filter.Q.setValueAtTime(0.8, now);
 
   gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(profile.gain, now + 0.005);
+  gainNode.gain.exponentialRampToValueAtTime(effectiveGain, now + 0.005);
   gainNode.gain.exponentialRampToValueAtTime(0.0001, now + profile.duration);
 
   oscillator.connect(filter);
@@ -136,69 +218,6 @@ function playLaneSound(instrument: MidiInstrument): void {
 
   oscillator.start(now);
   oscillator.stop(now + profile.duration + 0.02);
-}
-
-function playNoiseInstrument(context: AudioContext, instrument: MidiInstrument): void {
-  const noise = context.createBufferSource();
-  noise.buffer = getNoiseBuffer(context);
-
-  const noiseFilter = context.createBiquadFilter();
-  const noiseGain = context.createGain();
-  const outputNode = getOutputNode(context);
-  const now = context.currentTime;
-
-  noiseFilter.type = instrument === 'snare' ? 'highpass' : 'bandpass';
-
-  switch (instrument) {
-    case 'snare':
-      noiseFilter.frequency.setValueAtTime(1800, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.45, now + 0.003);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-      break;
-    case 'closedHat':
-      noiseFilter.frequency.setValueAtTime(7000, now);
-      noiseFilter.Q.setValueAtTime(2.5, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.22, now + 0.002);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
-      break;
-    case 'openHat':
-      noiseFilter.frequency.setValueAtTime(5200, now);
-      noiseFilter.Q.setValueAtTime(1.6, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.18, now + 0.002);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      break;
-    case 'crash':
-      noiseFilter.frequency.setValueAtTime(3600, now);
-      noiseFilter.Q.setValueAtTime(1.1, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.22, now + 0.003);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
-      break;
-  }
-
-  noise.connect(noiseFilter);
-  noiseFilter.connect(noiseGain);
-  noiseGain.connect(outputNode);
-  noise.start(now);
-  noise.stop(now + 0.3);
-
-  if (instrument === 'snare') {
-    const snapOsc = context.createOscillator();
-    const snapGain = context.createGain();
-    snapOsc.type = 'triangle';
-    snapOsc.frequency.setValueAtTime(180, now);
-    snapOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
-    snapGain.gain.setValueAtTime(0.0001, now);
-    snapGain.gain.exponentialRampToValueAtTime(0.18, now + 0.002);
-    snapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-    snapOsc.connect(snapGain);
-    snapGain.connect(outputNode);
-    snapOsc.start(now);
-    snapOsc.stop(now + 0.1);
-  }
 }
 
 function getStepDurationMs(element: MidiElement): number {
@@ -230,8 +249,16 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
     for (const lane of normalized.lanes) {
-      if (lane.activeSteps[stepIndex]) {
-        playLaneSound(lane.instrument);
+      const velocity = normalized.inputMode === 'tick'
+        ? lane.stepVelocities[stepIndex]
+        : lane.activeSteps[stepIndex]
+          ? lane.stepVelocities[stepIndex] === 'off'
+            ? 'normal'
+            : lane.stepVelocities[stepIndex]
+          : 'off';
+      if (velocity !== 'off') {
+        const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+        playLaneSound(lane.instrument, velocity, volume);
       }
     }
   }
@@ -296,6 +323,7 @@ export function render(
   ctx.fill();
   ctx.stroke();
 
+  const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
   ctx.fillStyle = '#2f3b52';
   ctx.font = '12px sans-serif';
   ctx.textAlign = 'left';
@@ -306,18 +334,23 @@ export function render(
   ctx.font = '10px sans-serif';
   ctx.fillText(
     `${normalized.steps} steps · ${normalized.tempo} BPM · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
-    layout.bounds.left + 52,
-    layout.bounds.top + 16
+    layout.toggleModeBounds.right + 8,
+    textY
   );
 
   renderPlayButton(ctx, layout.playButtonBounds, normalized.isLooping);
+  renderModeToggle(ctx, layout.toggleModeBounds, normalized.inputMode);
 
   for (const laneLayout of layout.lanes) {
-    renderLane(ctx, normalized, laneLayout, currentStep);
+    renderLane(ctx, normalized, laneLayout, currentStep, normalized.inputMode);
   }
 
   renderAddLaneButton(ctx, layout.addLaneBounds);
   renderOpenInstrumentMenu(ctx, normalized, layout);
+
+  if (normalized.automationEnabled && layout.automationLaneBounds) {
+    renderAutomationLane(ctx, normalized, layout);
+  }
 
   ctx.restore();
 }
@@ -341,35 +374,39 @@ function renderPlayButton(
     const insetX = (bounds.right - bounds.left) * 0.28;
     const insetY = (bounds.bottom - bounds.top) * 0.24;
     const barWidth = (bounds.right - bounds.left) * 0.14;
-    ctx.fillRect(
-      bounds.left + insetX,
-      bounds.top + insetY,
-      barWidth,
-      bounds.bottom - bounds.top - insetY * 2
-    );
-    ctx.fillRect(
-      bounds.right - insetX - barWidth,
-      bounds.top + insetY,
-      barWidth,
-      bounds.bottom - bounds.top - insetY * 2
-    );
+    ctx.fillRect(bounds.left + insetX, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
+    ctx.fillRect(bounds.right - insetX - barWidth, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
   } else {
     ctx.beginPath();
-    ctx.moveTo(
-      bounds.left + (bounds.right - bounds.left) * 0.34,
-      bounds.top + (bounds.bottom - bounds.top) * 0.22
-    );
-    ctx.lineTo(
-      bounds.right - (bounds.right - bounds.left) * 0.28,
-      (bounds.top + bounds.bottom) / 2
-    );
-    ctx.lineTo(
-      bounds.left + (bounds.right - bounds.left) * 0.34,
-      bounds.bottom - (bounds.bottom - bounds.top) * 0.22
-    );
+    ctx.moveTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.top + (bounds.bottom - bounds.top) * 0.22);
+    ctx.lineTo(bounds.right - (bounds.right - bounds.left) * 0.28, (bounds.top + bounds.bottom) / 2);
+    ctx.lineTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.bottom - (bounds.bottom - bounds.top) * 0.22);
     ctx.closePath();
     ctx.fill();
   }
+  ctx.restore();
+}
+
+function renderModeToggle(
+  ctx: CanvasRenderingContext2D,
+  bounds: BoundingBox,
+  mode: MidiInputMode
+): void {
+  ctx.save();
+  const isTickMode = mode === 'tick';
+  ctx.fillStyle = isTickMode ? '#6d28d9' : '#ffffff';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
+  ctx.font = 'bold 8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
   ctx.restore();
 }
 
@@ -377,7 +414,8 @@ function renderLane(
   ctx: CanvasRenderingContext2D,
   element: MidiElement,
   laneLayout: ReturnType<typeof getMidiLayout>['lanes'][number],
-  currentStep: number | null
+  currentStep: number | null,
+  mode: MidiInputMode
 ): void {
   const lane = element.lanes[laneLayout.laneIndex];
   const accentColor = getLaneAccentColor(lane.instrument);
@@ -413,11 +451,7 @@ function renderLane(
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(
-    getInstrumentLabel(lane.instrument),
-    laneLayout.instrumentBounds.left + 18,
-    laneLayout.instrumentBounds.top + 22
-  );
+  ctx.fillText(getInstrumentLabel(lane.instrument), laneLayout.instrumentBounds.left + 18, laneLayout.instrumentBounds.top + 22);
 
   ctx.fillStyle = '#667085';
   ctx.font = '9px sans-serif';
@@ -454,19 +488,53 @@ function renderLane(
   for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
     const x = laneLayout.gridBounds.left + stepIndex * laneLayout.stepWidth;
     const isBarBoundary = stepIndex % 4 === 0;
+    const velocity = lane.stepVelocities[stepIndex];
 
     if (currentStep === stepIndex) {
       ctx.fillStyle = 'rgba(15, 118, 110, 0.10)';
       ctx.fillRect(x, laneLayout.gridBounds.top, laneLayout.stepWidth, laneLayout.stepHeight);
     }
 
-    if (lane.activeSteps[stepIndex]) {
-      ctx.fillStyle = accentColor;
+    if (mode === 'tick') {
+      if (velocity !== 'off') {
+        const ratioMap: Record<StepVelocity, number> = {
+          off: 0,
+          low: 0.33,
+          normal: 0.6,
+          high: 0.9,
+        };
+        const colorMap: Record<StepVelocity, string> = {
+          off: 'transparent',
+          low: '#5eead4',
+          normal: accentColor,
+          high: '#7c3aed',
+        };
+        const ratio = ratioMap[velocity];
+        const tickHeight = laneLayout.stepHeight * ratio;
+        const tickCenterY = (laneLayout.gridBounds.top + laneLayout.gridBounds.bottom) / 2;
+        const tickX = x + laneLayout.stepWidth / 2;
+        ctx.strokeStyle = colorMap[velocity];
+        ctx.lineWidth = Math.max(3, laneLayout.stepWidth * 0.25);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tickX, tickCenterY - tickHeight / 2);
+        ctx.lineTo(tickX, tickCenterY + tickHeight / 2);
+        ctx.stroke();
+      }
+    } else if (lane.activeSteps[stepIndex]) {
+      const alphaMap: Record<StepVelocity, number> = {
+        off: 0.5,
+        low: 0.55,
+        normal: 0.85,
+        high: 1,
+      };
+      const inset = velocity === 'high' ? 2 : velocity === 'low' ? 7 : 4;
+      ctx.fillStyle = withAlpha(accentColor, alphaMap[velocity]);
       ctx.beginPath();
       ctx.roundRect(
-        x + 4,
+        x + inset,
         laneLayout.gridBounds.top + 4,
-        Math.max(4, laneLayout.stepWidth - 8),
+        Math.max(4, laneLayout.stepWidth - inset * 2),
         Math.max(8, laneLayout.stepHeight - 8),
         6
       );
@@ -484,8 +552,7 @@ function renderLane(
   }
 
   if (currentStep !== null) {
-    const playheadX =
-      laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
+    const playheadX = laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
     ctx.strokeStyle = '#f97316';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -588,10 +655,66 @@ function renderOpenInstrumentMenu(
   ctx.restore();
 }
 
+function renderAutomationLane(
+  ctx: CanvasRenderingContext2D,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>
+): void {
+  if (!layout.automationLaneBounds) return;
+
+  const lane = layout.automationLaneBounds;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+  ctx.moveTo(lane.left, lane.top);
+  ctx.lineTo(lane.left, lane.bottom);
+  ctx.lineTo(lane.right, lane.bottom);
+  ctx.lineTo(lane.right, lane.top);
+  ctx.stroke();
+
+  if (element.automationCurvePaths) {
+    ctx.strokeStyle = '#0f766e';
+    for (const path of element.automationCurvePaths) {
+      if (path.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(path[i].x, path[i].y);
+      }
+      ctx.stroke();
+    }
+  }
+
+  const indicatorW = 36;
+  const indicatorH = 20;
+  const indicatorX = lane.left + 4;
+  const indicatorY = lane.top + 4;
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+
+  ctx.restore();
+}
+
 function getLaneAccentColor(instrument: MidiInstrument): string {
   const index = MIDI_LANE_INSTRUMENTS.indexOf(instrument);
   const colors = ['#0f766e', '#0b7285', '#b45309', '#7c3aed', '#1d4ed8', '#be185d', '#c2410c'];
   return colors[Math.max(0, index) % colors.length];
+}
+
+function withAlpha(hexColor: string, alpha: number): string {
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const alphaHex = Math.round(safeAlpha * 255).toString(16).padStart(2, '0');
+  return `${hexColor}${alphaHex}`;
 }
 
 export function getBounds(element: MidiElement): BoundingBox | null {

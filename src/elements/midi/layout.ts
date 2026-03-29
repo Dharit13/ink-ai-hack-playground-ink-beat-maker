@@ -1,9 +1,8 @@
-import type { BoundingBox } from '../../types';
+﻿import type { BoundingBox } from '../../types';
 import type { MidiElement } from './types';
 import {
   MIDI_ADD_BUTTON_SIZE,
   MIDI_BODY_TOP_OFFSET,
-  MIDI_BOTTOM_PADDING,
   MIDI_FOOTER_GAP,
   MIDI_HEADER_HEIGHT,
   MIDI_LANE_GAP,
@@ -24,9 +23,11 @@ export interface MidiLaneLayout {
 export interface MidiLayout {
   bounds: BoundingBox;
   playButtonBounds: BoundingBox;
+  toggleModeBounds: BoundingBox;
   addLaneBounds: BoundingBox;
   lanes: MidiLaneLayout[];
   headerHeight: number;
+  automationLaneBounds?: BoundingBox;
 }
 
 const OUTER_PADDING = 10;
@@ -35,7 +36,10 @@ const CONTROL_GAP = 10;
 const LANE_LABEL_WIDTH = 102;
 const REMOVE_BUTTON_SIZE = 16;
 const MENU_ROW_HEIGHT = 22;
+const TOGGLE_BUTTON_WIDTH = 38;
 const CONTROL_HIT_PADDING = 8;
+const AUTOMATION_GAP = 8;
+const AUTOMATION_ZONE_REACH = 220;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
   const normalized = normalizeMidiElement(element);
@@ -65,6 +69,13 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: bounds.top + (headerHeight - playButtonSize) / 2 + 5 + playButtonSize,
   };
 
+  const toggleModeBounds: BoundingBox = {
+    left: playButtonBounds.right + CONTROL_GAP,
+    top: playButtonBounds.top,
+    right: playButtonBounds.right + CONTROL_GAP + TOGGLE_BUTTON_WIDTH,
+    bottom: playButtonBounds.bottom,
+  };
+
   for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
     const laneTop = bodyTop + laneIndex * (MIDI_LANE_HEIGHT + MIDI_LANE_GAP);
     const instrumentBounds: BoundingBox = {
@@ -85,18 +96,14 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
       right: bounds.right - OUTER_PADDING,
       bottom: laneTop + MIDI_LANE_HEIGHT,
     };
-    const menuHeight = MENU_ROW_HEIGHT * normalized.steps;
-    const availableBelow = bounds.bottom - instrumentBounds.bottom - 8;
-    const menuTop =
-      availableBelow >= MENU_ROW_HEIGHT * normalized.lanes.length
-        ? instrumentBounds.bottom + 4
-        : Math.max(bounds.top + 30, instrumentBounds.top);
+    const menuTop = instrumentBounds.bottom + 4;
     const instrumentMenuBounds: BoundingBox = {
       left: instrumentBounds.left,
       top: menuTop,
       right: instrumentBounds.right + 34,
       bottom: menuTop + MENU_ROW_HEIGHT * 7,
     };
+
     lanes.push({
       laneIndex,
       instrumentBounds,
@@ -116,12 +123,44 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: lastLaneBottom + MIDI_FOOTER_GAP + MIDI_ADD_BUTTON_SIZE,
   };
 
+  const automationLaneBounds: BoundingBox | undefined =
+    normalized.automationEnabled &&
+    normalized.automationTopY !== undefined &&
+    normalized.automationBottomY !== undefined &&
+    normalized.automationLeftX !== undefined &&
+    normalized.automationRightX !== undefined
+      ? {
+          left: normalized.automationLeftX,
+          top: normalized.automationTopY,
+          right: normalized.automationRightX,
+          bottom: normalized.automationBottomY,
+        }
+      : undefined;
+
   return {
     bounds,
     playButtonBounds,
+    toggleModeBounds,
     addLaneBounds,
     lanes,
     headerHeight,
+    automationLaneBounds,
+  };
+}
+
+export function getAutomationZoneBounds(element: MidiElement): BoundingBox {
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+  const lastLane = layout.lanes[layout.lanes.length - 1];
+  const left = lastLane ? lastLane.gridBounds.left : layout.bounds.left + OUTER_PADDING;
+  const right = lastLane ? lastLane.gridBounds.right : layout.bounds.right - OUTER_PADDING;
+  const top = layout.addLaneBounds.bottom + AUTOMATION_GAP;
+
+  return {
+    left,
+    top,
+    right,
+    bottom: top + AUTOMATION_ZONE_REACH,
   };
 }
 
@@ -161,6 +200,7 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
 
   const controlBounds = [
     expandBounds(layout.playButtonBounds, CONTROL_HIT_PADDING),
+    expandBounds(layout.toggleModeBounds, CONTROL_HIT_PADDING),
     expandBounds(layout.addLaneBounds, CONTROL_HIT_PADDING),
     ...layout.lanes.flatMap((lane) => [
       expandBounds(lane.instrumentBounds, CONTROL_HIT_PADDING),
@@ -175,6 +215,12 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
     if (openLane) {
       controlBounds.push(expandBounds(openLane.instrumentMenuBounds, CONTROL_HIT_PADDING));
     }
+  }
+
+  if (layout.automationLaneBounds) {
+    controlBounds.push(expandBounds(layout.automationLaneBounds, CONTROL_HIT_PADDING));
+  } else {
+    controlBounds.push(expandBounds(getAutomationZoneBounds(normalized), CONTROL_HIT_PADDING));
   }
 
   for (const bounds of controlBounds) {

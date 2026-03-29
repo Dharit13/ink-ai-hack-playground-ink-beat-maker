@@ -1,4 +1,4 @@
-import type { BoundingBox, TransformableElement } from '../../types/primitives';
+﻿import type { BoundingBox, TransformableElement } from '../../types/primitives';
 import { generateId } from '../../types/primitives';
 
 export type MidiInstrument =
@@ -10,10 +10,14 @@ export type MidiInstrument =
   | 'midTom'
   | 'crash';
 
+export type MidiInputMode = 'tap' | 'tick';
+export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
+
 export interface MidiLane {
   id: string;
   instrument: MidiInstrument;
   activeSteps: boolean[];
+  stepVelocities: StepVelocity[];
 }
 
 export interface MidiElement extends TransformableElement {
@@ -24,8 +28,19 @@ export interface MidiElement extends TransformableElement {
   lanes: MidiLane[];
   tempo: number;
   isLooping: boolean;
+  inputMode: MidiInputMode;
+  automationEnabled: boolean;
+  stepVolumes: number[];
+  automationTopY?: number;
+  automationBottomY?: number;
+  automationLeftX?: number;
+  automationRightX?: number;
+  automationUPaths?: Array<Array<{ x: number; y: number }>>;
+  automationCurvePaths?: Array<Array<{ x: number; y: number }>>;
   openInstrumentLaneId?: string | null;
+  // Legacy fields kept optional so older saved notes can still load.
   activeSteps?: boolean[];
+  stepVelocities?: StepVelocity[];
   instrument?: MidiInstrument;
 }
 
@@ -77,6 +92,7 @@ export function createMidiLane(
     id: generateId(),
     instrument,
     activeSteps: Array.from({ length: steps }, () => false),
+    stepVelocities: Array.from({ length: steps }, () => 'off' as StepVelocity),
   };
 }
 
@@ -100,28 +116,53 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
       lanes: element.lanes.map((lane) => ({
         ...lane,
         activeSteps: ensureStepLength(lane.activeSteps, element.steps),
+        stepVelocities: ensureVelocityLength(lane.stepVelocities, lane.activeSteps, element.steps),
       })),
       height: getMidiHeightForLaneCount(element.lanes.length),
+      inputMode: element.inputMode ?? 'tap',
+      automationEnabled: element.automationEnabled ?? false,
+      stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
     };
   }
 
-  const legacyLane = createMidiLane(
-    element.steps,
-    element.instrument ?? 'snare'
-  );
+  const legacyLane = createMidiLane(element.steps, element.instrument ?? 'snare');
   legacyLane.activeSteps = ensureStepLength(element.activeSteps ?? [], element.steps);
+  legacyLane.stepVelocities = ensureVelocityLength(
+    element.stepVelocities ?? [],
+    legacyLane.activeSteps,
+    element.steps
+  );
 
   return {
     ...element,
     lanes: [legacyLane],
     height: getMidiHeightForLaneCount(1),
+    inputMode: element.inputMode ?? 'tap',
+    automationEnabled: element.automationEnabled ?? false,
+    stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
     openInstrumentLaneId: null,
   };
 }
 
 function ensureStepLength(activeSteps: boolean[], steps: number): boolean[] {
   return Array.from({ length: steps }, (_, index) => Boolean(activeSteps[index]));
+}
+
+function ensureVelocityLength(
+  stepVelocities: StepVelocity[],
+  activeSteps: boolean[],
+  steps: number
+): StepVelocity[] {
+  return Array.from({ length: steps }, (_, index) => {
+    const velocity = stepVelocities[index];
+    if (velocity) return velocity;
+    return activeSteps[index] ? 'normal' : 'off';
+  });
+}
+
+function ensureVolumeLength(stepVolumes: number[], steps: number): number[] {
+  return Array.from({ length: steps }, (_, index) => stepVolumes[index] ?? 1.0);
 }
 
 export function createMidiElement(bounds: BoundingBox): MidiElement {
@@ -141,6 +182,9 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     lanes: [createMidiLane(DEFAULT_MIDI_STEPS, 'snare')],
     tempo: DEFAULT_MIDI_TEMPO,
     isLooping: false,
+    inputMode: 'tap',
+    automationEnabled: false,
+    stepVolumes: Array.from({ length: DEFAULT_MIDI_STEPS }, () => 1.0),
     openInstrumentLaneId: null,
   };
 }
