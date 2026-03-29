@@ -1,8 +1,9 @@
-﻿import type { BoundingBox, Offset, Stroke } from '../../types';
+import type { BoundingBox, Offset, Stroke } from '../../types';
 import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlugin';
 import type { HandwritingRecognitionResult } from '../../recognition/RecognitionService';
 import { getRecognitionService } from '../../recognition/RecognitionService';
 import type { MidiElement, MidiInputMode, StepVelocity } from './types';
+import { debugLog } from '../../debug/DebugLogger';
 import {
   getAutomationZoneBounds,
   getMidiBounds,
@@ -245,7 +246,7 @@ function togglePlayState(element: MidiElement): MidiElement {
   };
 }
 
-const DOWNLOAD_ZONE_PADDING = 120;
+const DOWNLOAD_ZONE_PADDING = 250;
 
 function getDownloadZoneBounds(element: MidiElement): BoundingBox {
   const b = getMidiBounds(element);
@@ -389,9 +390,91 @@ function getStepVolumesFromStrokes(
   return updatedVolumes;
 }
 
+/**
+ * Simple Levenshtein distance for fuzzy matching.
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= b.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return matrix[a.length][b.length];
+}
+
+/**
+ * Check if text looks like "download" using fuzzy matching.
+ * Allows up to 3 edit-distance for handwriting recognition errors.
+ */
+function looksLikeDownload(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/[^a-z]/g, '');
+  if (!normalized) return false;
+
+  // Exact or substring matches
+  if (normalized.includes('download') || normalized === 'dl') return true;
+
+  // Fuzzy match for "dl" (short text, allow 1 edit)
+  if (normalized.length <= 3 && levenshteinDistance(normalized, 'dl') <= 1) return true;
+
+  // Common handwriting misrecognitions
+  const variants = [
+    'downlod', 'downlond', 'downlood', 'downlaod', 'downliad',
+    'downbad', 'downloa', 'downlo', 'dwnload', 'donwload',
+    'dounload', 'dwonload', 'downloed', 'downloud',
+  ];
+  if (variants.includes(normalized)) return true;
+
+  // Fuzzy match: Levenshtein distance ≤ 3 from "download"
+  if (normalized.length >= 4 && levenshteinDistance(normalized, 'download') <= 3) return true;
+
+  return false;
+}
+
 function isDownloadGesture(recognitionResult?: HandwritingRecognitionResult): boolean {
-  const text = (recognitionResult?.rawText ?? '').trim().toLowerCase();
-  return text === 'download' || text === 'dl';
+  if (!recognitionResult) return false;
+
+  // Check rawText
+  const raw = recognitionResult.rawText.trim().toLowerCase();
+  debugLog.info('[MIDI] isDownloadGesture checking', { rawText: raw });
+  if (looksLikeDownload(raw)) {
+    debugLog.info('[MIDI] Download gesture matched via rawText', { raw });
+    return true;
+  }
+
+  // Also check all token candidates (recognition may pick a wrong top candidate)
+  for (const line of recognitionResult.lines) {
+    for (const token of line.tokens) {
+      for (const candidate of token.candidates) {
+        const c = candidate.text.trim().toLowerCase();
+        if (looksLikeDownload(c)) {
+          debugLog.info('[MIDI] Download gesture matched via candidate', { candidate: c });
+          return true;
+        }
+      }
+    }
+  }
+
+  debugLog.info('[MIDI] Download gesture NOT matched', {
+    rawText: raw,
+    candidates: recognitionResult.lines
+      .flatMap(l => l.tokens)
+      .flatMap(t => t.candidates)
+      .map(c => c.text)
+      .slice(0, 10),
+  });
+  return false;
 }
 
 function normalizeAutomationCurvePaths(
@@ -418,11 +501,20 @@ export function isInterestedIn(
   strokeBounds: BoundingBox
 ): boolean {
   const normalized = normalizeMidiElement(element);
-  return (
-    boundingBoxesOverlap(getMidiInteractionBounds(normalized), strokeBounds) ||
-    boundingBoxesOverlap(getAutomationZoneBounds(normalized), strokeBounds) ||
-    boundingBoxesOverlap(getDownloadZoneBounds(element), strokeBounds)
-  );
+  const downloadZone = getDownloadZoneBounds(element);
+  const interactionBounds = getMidiInteractionBounds(normalized);
+  const automationBounds = getAutomationZoneBounds(normalized);
+  const inInteraction = boundingBoxesOverlap(interactionBounds, strokeBounds);
+  const inAutomation = boundingBoxesOverlap(automationBounds, strokeBounds);
+  const inDownload = boundingBoxesOverlap(downloadZone, strokeBounds);
+  const result = inInteraction || inAutomation || inDownload;
+  debugLog.info('[MIDI] isInterestedIn', {
+    result,
+    inInteraction,
+    inAutomation,
+    inDownload,
+  });
+  return result;
 }
 
 export async function acceptInk(
@@ -430,29 +522,64 @@ export async function acceptInk(
   strokes: Stroke[],
   recognitionResult?: HandwritingRecognitionResult
 ): Promise<InteractionResult> {
+  debugLog.info('[MIDI] acceptInk called', { strokeCount: strokes.length });
+
   // Check for "download" gesture — accept strokes anywhere in the padded zone around the element
+  const normalized = normalizeMidiElement(element);
+  const midiMainBounds = getMidiBounds(normalized);
   const downloadZone = getDownloadZoneBounds(element);
+
   const strokesInDownloadZone = strokes.some((stroke) => {
     const bounds = getStrokeBounds(stroke);
     return bounds ? boundingBoxesOverlap(downloadZone, bounds) : false;
   });
 
-  if (strokesInDownloadZone) {
+  // Check if ALL strokes are outside the main MIDI element bounds
+  const allStrokesOutsideMain = strokes.every((stroke) => {
+    const bounds = getStrokeBounds(stroke);
+    if (!bounds) return true;
+    return !boundingBoxesOverlap(midiMainBounds, bounds);
+  });
+
+  debugLog.info('[MIDI] acceptInk zone checks', {
+    strokesInDownloadZone,
+    allStrokesOutsideMain,
+    strokeCount: strokes.length,
+  });
+
+  if (strokesInDownloadZone && strokes.length >= 2) {
+    // Only attempt download recognition with 2+ strokes (a single stroke can't form "dl" or "download")
+    debugLog.info('[MIDI] Attempting download recognition', {
+      strokeCount: strokes.length,
+    });
     let recog = recognitionResult;
     if (!recog) {
       try {
         recog = await getRecognitionService().recognizeGoogle(strokes);
-      } catch {
-        // recognition unavailable — fall through to normal handling
+        debugLog.info('[MIDI] Recognition result for download', {
+          rawText: recog?.rawText,
+          lineCount: recog?.lines?.length,
+        });
+      } catch (err) {
+        debugLog.warn('[MIDI] Recognition FAILED for download check', err);
       }
     }
-    if (isDownloadGesture(recog)) {
+    const isDownload = isDownloadGesture(recog);
+    debugLog.info('[MIDI] Download gesture check', { isDownload, rawText: recog?.rawText });
+    if (isDownload) {
+      debugLog.info('[MIDI] EXPORTING MIDI FILE');
       exportMidiFile(element);
       return { element, consumed: true, strokesConsumed: strokes };
     }
   }
 
-  const normalized = normalizeMidiElement(element);
+  // If strokes are outside the main MIDI element (e.g., writing near it),
+  // don't consume them — let them buffer for batch processing (e.g., multi-stroke "dl")
+  if (allStrokesOutsideMain && strokesInDownloadZone) {
+    debugLog.info('[MIDI] Strokes outside main bounds, not consuming (buffering for text recognition)');
+    return { element: normalized, consumed: false, strokesConsumed: [] };
+  }
+
   const layout = getMidiLayout(normalized);
   const mode = normalized.inputMode ?? 'tap';
 
@@ -581,7 +708,7 @@ export async function acceptInk(
     }
   }
 
-  const midiMainBounds = getMidiBounds(normalized);
+
   const allStrokesBelowMain = strokes.every((stroke) => {
     const bounds = getStrokeBounds(stroke);
     return bounds ? bounds.top >= midiMainBounds.bottom : false;

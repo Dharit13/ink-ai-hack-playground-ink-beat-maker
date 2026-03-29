@@ -408,6 +408,11 @@ function App() {
 
     debugLog.info('Processing stroke batch', { count: strokes.length });
 
+    // Log what elements are on the canvas for debugging
+    const elementTypes = currentNoteRef.current.elements.map(e => e.type);
+    const hasMidi = elementTypes.includes('midi');
+    debugLog.info('tryInteraction: elements on canvas', { elementTypes, hasMidi, elementCount: elementTypes.length });
+
     // First, check if any existing interactive element wants these strokes
     const interactionResult = await tryInteraction(currentNoteRef.current.elements, strokes);
     if (interactionResult) {

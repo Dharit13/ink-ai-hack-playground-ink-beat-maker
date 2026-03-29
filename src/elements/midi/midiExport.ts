@@ -1,4 +1,4 @@
-import type { MidiElement, StepVelocity } from './types';
+import type { MidiElement, MidiInstrument, MidiLane, StepVelocity } from './types';
 
 const TICKS_PER_QUARTER = 480;
 const TICKS_PER_STEP = TICKS_PER_QUARTER / 4; // 16th note = 120 ticks
@@ -12,7 +12,16 @@ const VELOCITY_VALUE: Record<StepVelocity, number> = {
 
 // GM percussion channel (0-indexed channel 9)
 const PERCUSSION_CHANNEL = 9;
-const SNARE_NOTE = 38; // Acoustic Snare
+
+const GM_NOTE: Record<MidiInstrument, number> = {
+  kick: 36,       // Bass Drum 1
+  snare: 38,      // Acoustic Snare
+  closedHat: 42,  // Closed Hi-Hat
+  openHat: 46,    // Open Hi-Hat
+  tom: 45,        // Low Tom
+  midTom: 47,     // Low-Mid Tom
+  crash: 49,      // Crash Cymbal 1
+};
 
 function writeVarLen(value: number): number[] {
   const bytes: number[] = [];
@@ -38,20 +47,25 @@ function writeUint16BE(value: number): number[] {
   return [(value >> 8) & 0xff, value & 0xff];
 }
 
-function buildTrackEvents(element: MidiElement): number[] {
+function buildLaneTrackEvents(
+  element: MidiElement,
+  lane: MidiLane,
+  isFirstTrack: boolean
+): number[] {
   const events: number[] = [];
 
-  // Set tempo event: FF 51 03 tt tt tt
-  const microsecondsPerBeat = Math.round(60_000_000 / element.tempo);
-  events.push(
-    ...writeVarLen(0), // delta time 0
-    0xff, 0x51, 0x03,
-    ...writeUint32BE(microsecondsPerBeat).slice(1), // 3 bytes
-  );
+  if (isFirstTrack) {
+    // Set tempo event: FF 51 03 tt tt tt (only in first track for format 1)
+    const microsecondsPerBeat = Math.round(60_000_000 / element.tempo);
+    events.push(
+      ...writeVarLen(0),
+      0xff, 0x51, 0x03,
+      ...writeUint32BE(microsecondsPerBeat).slice(1),
+    );
+  }
 
   const mode = element.inputMode ?? 'tap';
-  const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
-  const note = SNARE_NOTE;
+  const note = GM_NOTE[lane.instrument] ?? 38;
   const noteOnStatus = 0x90 | PERCUSSION_CHANNEL;
   const noteOffStatus = 0x80 | PERCUSSION_CHANNEL;
 
@@ -62,10 +76,10 @@ function buildTrackEvents(element: MidiElement): number[] {
 
     let velocityValue = 0;
     if (mode === 'tick') {
-      velocityValue = VELOCITY_VALUE[velocities[stepIndex]];
+      velocityValue = VELOCITY_VALUE[lane.stepVelocities[stepIndex]];
     } else {
-      if (element.activeSteps[stepIndex]) {
-        const vel = velocities[stepIndex] !== 'off' ? velocities[stepIndex] : 'normal';
+      if (lane.activeSteps[stepIndex]) {
+        const vel = lane.stepVelocities[stepIndex] !== 'off' ? lane.stepVelocities[stepIndex] : 'normal';
         velocityValue = VELOCITY_VALUE[vel];
       }
     }
@@ -94,26 +108,25 @@ function buildTrackEvents(element: MidiElement): number[] {
 }
 
 function buildMidiFile(element: MidiElement): Uint8Array {
-  const trackEvents = buildTrackEvents(element);
-  const trackLength = trackEvents.length;
+  const trackChunks: number[][] = element.lanes.map((lane, i) => {
+    const events = buildLaneTrackEvents(element, lane, i === 0);
+    return [
+      0x4d, 0x54, 0x72, 0x6b, // MTrk
+      ...writeUint32BE(events.length),
+      ...events,
+    ];
+  });
 
+  const numTracks = trackChunks.length;
   const header = [
-    // MThd
-    0x4d, 0x54, 0x68, 0x64,
-    ...writeUint32BE(6),       // chunk length = 6
-    ...writeUint16BE(0),       // format 0 (single track)
-    ...writeUint16BE(1),       // 1 track
+    0x4d, 0x54, 0x68, 0x64,       // MThd
+    ...writeUint32BE(6),            // chunk length = 6
+    ...writeUint16BE(numTracks > 1 ? 1 : 0), // format 1 if multi-track, 0 if single
+    ...writeUint16BE(numTracks),
     ...writeUint16BE(TICKS_PER_QUARTER),
   ];
 
-  const trackChunk = [
-    // MTrk
-    0x4d, 0x54, 0x72, 0x6b,
-    ...writeUint32BE(trackLength),
-    ...trackEvents,
-  ];
-
-  return new Uint8Array([...header, ...trackChunk]);
+  return new Uint8Array([...header, ...trackChunks.flat()]);
 }
 
 export function exportMidiFile(element: MidiElement): void {
@@ -123,7 +136,7 @@ export function exportMidiFile(element: MidiElement): void {
 
   const a = document.createElement('a');
   a.href = url;
-  a.download = `beat-${element.id.slice(0, 8)}.mid`;
+  a.download = `beat-${String(element.id).slice(0, 8)}.mid`;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
