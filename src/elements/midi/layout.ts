@@ -134,16 +134,12 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   };
 
   const automationLaneBounds: BoundingBox | undefined =
-    normalized.automationEnabled &&
-    normalized.automationTopY !== undefined &&
-    normalized.automationBottomY !== undefined &&
-    normalized.automationLeftX !== undefined &&
-    normalized.automationRightX !== undefined
+    normalized.automationEnabled && normalized.automationHeight !== undefined
       ? {
-          left: normalized.automationLeftX,
-          top: normalized.automationTopY,
-          right: normalized.automationRightX,
-          bottom: normalized.automationBottomY,
+          left: lanes[0]?.gridBounds.left ?? bounds.left + OUTER_PADDING,
+          top: addLaneBounds.bottom + AUTOMATION_GAP,
+          right: lanes[0]?.gridBounds.right ?? bounds.right - OUTER_PADDING,
+          bottom: addLaneBounds.bottom + AUTOMATION_GAP + normalized.automationHeight,
         }
       : undefined;
 
