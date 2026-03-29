@@ -32,7 +32,7 @@ export const DEFAULT_MIDI_STEPS = 16;
 export const DEFAULT_MIDI_TEMPO = 120;
 export const DEFAULT_MIDI_INSTRUMENT: MidiInstrument = 'snare';
 export const MIDI_MIN_WIDTH = 520;
-export const MIDI_MIN_HEIGHT = 72;
+export const MIDI_MIN_HEIGHT = 132;
 
 export function createMidiElement(bounds: BoundingBox): MidiElement {
   const width = Math.max(MIDI_MIN_WIDTH, bounds.right - bounds.left);

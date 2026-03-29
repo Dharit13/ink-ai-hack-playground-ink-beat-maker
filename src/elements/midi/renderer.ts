@@ -2,6 +2,20 @@ import type { BoundingBox } from '../../types';
 import type { HandleDescriptor, RenderOptions } from '../registry/ElementPlugin';
 import type { MidiElement, MidiInputMode, StepVelocity } from './types';
 import { getMidiBounds, getMidiLayout } from './layout';
+import {
+  getRoughCanvas,
+  seedFromId,
+  sketchContainer,
+  sketchLane,
+  sketchButtonIdle,
+  sketchButtonActive,
+  sketchStepActive,
+  sketchGridMajor,
+  sketchGridMinor,
+  sketchAutoBorder,
+  sketchVolBox,
+  sketchTickLine,
+} from './sketchUtils';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -166,60 +180,71 @@ export function render(
 
   const layout = getMidiLayout(element);
   const currentStep = syncPlayback(element, currentFrameTime);
+  const seed = seedFromId(element.id);
+  const rc = getRoughCanvas(ctx);
 
   ctx.save();
 
-  ctx.fillStyle = '#fffaf0';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(layout.bounds.left, layout.bounds.top, element.width, element.height, 12);
-  ctx.fill();
-  ctx.stroke();
+  // Subtle paper shadow
+  ctx.shadowBlur = 5;
+  ctx.shadowColor = 'rgba(0,0,0,0.08)';
+  rc.rectangle(layout.bounds.left, layout.bounds.top, element.width, element.height, sketchContainer(seed));
+  ctx.shadowBlur = 0;
 
-  ctx.fillStyle = '#667085';
-  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.font = '21px "Caveat", cursive';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
-  ctx.fillText(`${element.steps} steps · ${element.tempo} BPM · ${element.instrument}`, layout.toggleModeBounds.right + 8, textY);
+  ctx.fillText(
+    `${element.steps} Steps · ${element.tempo} BPM`,
+    layout.toggleModeBounds.right + 14,
+    textY
+  );
 
   const mode = element.inputMode ?? 'tap';
   const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
 
-  renderPlayButton(ctx, layout.playButtonBounds, element.isLooping);
-  renderModeToggle(ctx, layout.toggleModeBounds, mode);
-  renderLane(ctx, element, layout, currentStep, mode, velocities);
+  renderPlayButton(ctx, rc, layout.playButtonBounds, element.isLooping, seed);
+  renderModeToggle(ctx, rc, layout.toggleModeBounds, mode, seed);
+  renderLane(ctx, rc, element, layout, currentStep, mode, velocities, seed);
 
   if (element.automationEnabled && layout.automationLaneBounds) {
-    renderAutomationLane(ctx, element, layout);
+    renderAutomationLane(ctx, rc, element, layout, seed);
   }
 
   ctx.restore();
 }
 
-function renderPlayButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox, isLooping: boolean): void {
+function renderPlayButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  isLooping: boolean,
+  seed: number
+): void {
   ctx.save();
-  ctx.fillStyle = isLooping ? '#0f766e' : '#ffffff';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
-  ctx.fill();
-  ctx.stroke();
+  const w = bounds.right - bounds.left;
+  const h = bounds.bottom - bounds.top;
 
+  rc.rectangle(
+    bounds.left, bounds.top, w, h,
+    isLooping ? sketchButtonActive('#0f766e', seed + 1) : sketchButtonIdle(seed + 1)
+  );
+
+  // Icon glyph — keep crisp at this scale
   ctx.fillStyle = isLooping ? '#ffffff' : '#2f3b52';
   if (isLooping) {
-    const insetX = (bounds.right - bounds.left) * 0.28;
-    const insetY = (bounds.bottom - bounds.top) * 0.24;
-    const barWidth = (bounds.right - bounds.left) * 0.14;
-    ctx.fillRect(bounds.left + insetX, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
-    ctx.fillRect(bounds.right - insetX - barWidth, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
+    const insetX = w * 0.28;
+    const insetY = h * 0.24;
+    const barWidth = w * 0.14;
+    ctx.fillRect(bounds.left + insetX, bounds.top + insetY, barWidth, h - insetY * 2);
+    ctx.fillRect(bounds.right - insetX - barWidth, bounds.top + insetY, barWidth, h - insetY * 2);
   } else {
     ctx.beginPath();
-    ctx.moveTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.top + (bounds.bottom - bounds.top) * 0.22);
-    ctx.lineTo(bounds.right - (bounds.right - bounds.left) * 0.28, (bounds.top + bounds.bottom) / 2);
-    ctx.lineTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.bottom - (bounds.bottom - bounds.top) * 0.22);
+    ctx.moveTo(bounds.left + w * 0.34, bounds.top + h * 0.22);
+    ctx.lineTo(bounds.right - w * 0.28, (bounds.top + bounds.bottom) / 2);
+    ctx.lineTo(bounds.left + w * 0.34, bounds.bottom - h * 0.22);
     ctx.closePath();
     ctx.fill();
   }
@@ -228,21 +253,22 @@ function renderPlayButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox, is
 
 function renderModeToggle(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  mode: MidiInputMode
+  mode: MidiInputMode,
+  seed: number
 ): void {
   ctx.save();
   const isTickMode = mode === 'tick';
-  ctx.fillStyle = isTickMode ? '#6d28d9' : '#ffffff';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
-  ctx.fill();
-  ctx.stroke();
+
+  rc.rectangle(
+    bounds.left, bounds.top,
+    bounds.right - bounds.left, bounds.bottom - bounds.top,
+    isTickMode ? sketchButtonActive('#6d28d9', seed + 2) : sketchButtonIdle(seed + 2)
+  );
 
   ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
-  ctx.font = 'bold 8px sans-serif';
+  ctx.font = 'bold 17px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
@@ -251,32 +277,31 @@ function renderModeToggle(
 
 function renderLane(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   layout: ReturnType<typeof getMidiLayout>,
   currentStep: number | null,
   mode: MidiInputMode,
-  velocities: StepVelocity[]
+  velocities: StepVelocity[],
+  seed: number
 ): void {
   ctx.save();
+  const stepInsetX = Math.min(8, Math.max(5, layout.stepWidth * 0.14));
+  const stepInsetY = Math.min(8, Math.max(5, layout.stepHeight * 0.16));
 
-  ctx.fillStyle = '#fffef8';
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(
+  rc.rectangle(
     layout.laneBounds.left,
     layout.laneBounds.top,
     layout.laneBounds.right - layout.laneBounds.left,
     layout.laneBounds.bottom - layout.laneBounds.top,
-    8
+    sketchLane(seed + 3)
   );
-  ctx.fill();
-  ctx.stroke();
 
   for (let i = 0; i < element.steps; i++) {
     const x = layout.laneBounds.left + i * layout.stepWidth;
     const isBarBoundary = i % 4 === 0;
 
+    // Current-step highlight — keep crisp (live animation)
     if (currentStep === i) {
       ctx.fillStyle = 'rgba(15, 118, 110, 0.10)';
       ctx.fillRect(x, layout.laneBounds.top, layout.stepWidth, layout.stepHeight);
@@ -291,33 +316,37 @@ function renderLane(
         const tickHeight = layout.stepHeight * ratio;
         const tickCenterY = (layout.laneBounds.top + layout.laneBounds.bottom) / 2;
         const tickX = x + layout.stepWidth / 2;
-        ctx.strokeStyle = colorMap[vel];
-        ctx.lineWidth = Math.max(3, layout.stepWidth * 0.25);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(tickX, tickCenterY - tickHeight / 2);
-        ctx.lineTo(tickX, tickCenterY + tickHeight / 2);
-        ctx.stroke();
+        const tickWidth = Math.max(3, layout.stepWidth * 0.25);
+        rc.line(
+          tickX, tickCenterY - tickHeight / 2,
+          tickX, tickCenterY + tickHeight / 2,
+          sketchTickLine(colorMap[vel], tickWidth, seed + i * 7 + 10)
+        );
       }
     } else {
       if (element.activeSteps[i]) {
-        ctx.fillStyle = '#0f766e';
-        ctx.beginPath();
-        ctx.roundRect(x + 4, layout.laneBounds.top + 4, Math.max(4, layout.stepWidth - 8), Math.max(8, layout.stepHeight - 8), 6);
-        ctx.fill();
+        rc.rectangle(
+          x + stepInsetX,
+          layout.laneBounds.top + stepInsetY,
+          Math.max(4, layout.stepWidth - stepInsetX * 2),
+          Math.max(8, layout.stepHeight - stepInsetY * 2),
+          sketchStepActive(seed + i * 7 + 100)
+        );
       }
     }
 
     if (i > 0) {
-      ctx.strokeStyle = isBarBoundary ? '#94a3b8' : '#dbe3ed';
-      ctx.lineWidth = isBarBoundary ? 1.5 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x, layout.laneBounds.top + 1);
-      ctx.lineTo(x, layout.laneBounds.bottom - 1);
-      ctx.stroke();
+      rc.line(
+        x, layout.laneBounds.top + 1,
+        x, layout.laneBounds.bottom - 1,
+        isBarBoundary
+          ? sketchGridMajor(seed + i * 3 + 200)
+          : sketchGridMinor(seed + i * 3 + 200)
+      );
     }
   }
 
+  // Playhead — keep crisp (live animation)
   if (currentStep !== null) {
     const playheadX = layout.laneBounds.left + currentStep * layout.stepWidth + layout.stepWidth / 2;
     ctx.strokeStyle = '#f97316';
@@ -346,40 +375,38 @@ function replayPaths(
 
 function renderAutomationLane(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
-  layout: ReturnType<typeof getMidiLayout>
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
 ): void {
   const lane = layout.automationLaneBounds!;
 
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
 
-  // Snapped U border — left/right/bottom aligned to MIDI lane, clean lines
-  ctx.beginPath();
-  ctx.moveTo(lane.left, lane.top);
-  ctx.lineTo(lane.left, lane.bottom);
-  ctx.lineTo(lane.right, lane.bottom);
-  ctx.lineTo(lane.right, lane.top);
-  ctx.stroke();
+  // U-border as three separate rough lines
+  const borderOpts = sketchAutoBorder(seed + 300);
+  rc.line(lane.left, lane.top, lane.left, lane.bottom, borderOpts);
+  rc.line(lane.left, lane.bottom, lane.right, lane.bottom, borderOpts);
+  rc.line(lane.right, lane.bottom, lane.right, lane.top, borderOpts);
 
-  // Replay the user's actual curve stroke exactly as drawn — no snapping on this
+  // Replay the user's actual curve stroke exactly as drawn
   if (element.automationCurvePaths) {
+    ctx.strokeStyle = '#2f3b52';
+    ctx.lineWidth = 1.5;
     replayPaths(ctx, element.automationCurvePaths);
   }
 
-  // VOL indicator — sits just inside the top-left corner of the automation lane
+  // VOL indicator
   const indicatorW = 36;
   const indicatorH = 20;
   const indicatorX = lane.left + 4;
   const indicatorY = lane.top + 4;
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);
+  rc.rectangle(indicatorX, indicatorY, indicatorW, indicatorH, sketchVolBox(seed + 301));
   ctx.fillStyle = '#2f3b52';
-  ctx.font = 'bold 11px sans-serif';
+  ctx.font = 'bold 15px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);

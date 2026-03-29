@@ -14,7 +14,8 @@
     "@openrouter/sdk": "^0.9.11",
     "concaveman": "^2.0.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "roughjs": "^4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -13,11 +13,13 @@ export interface MidiLayout {
 }
 
 const OUTER_PADDING = 10;
-const HEADER_HEIGHT = 24;
-const PLAY_BUTTON_SIZE = 22;
-const CONTROL_GAP = 10;
-const BOTTOM_PADDING = 10;
-const TOGGLE_BUTTON_WIDTH = 38;
+const TOP_PADDING = 8;
+const HEADER_HEIGHT = 30;
+const PLAY_BUTTON_SIZE = 28;
+const CONTROL_GAP = 12;
+const BODY_GAP = 8;
+const BOTTOM_PADDING = 8;
+const TOGGLE_BUTTON_WIDTH = 60;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
   const tx = element.transform.values[6];
@@ -33,14 +35,14 @@ export function getMidiBounds(element: MidiElement): BoundingBox {
 
 export function getMidiLayout(element: MidiElement): MidiLayout {
   const bounds = getMidiBounds(element);
-  const headerHeight = Math.min(HEADER_HEIGHT, Math.max(18, element.height * 0.35));
+  const headerHeight = Math.min(HEADER_HEIGHT, Math.max(28, element.height * 0.34));
   const playButtonSize = Math.min(PLAY_BUTTON_SIZE, headerHeight);
 
   const playButtonBounds: BoundingBox = {
     left: bounds.left + OUTER_PADDING,
-    top: bounds.top + (headerHeight - playButtonSize) / 2 + 5,
+    top: bounds.top + TOP_PADDING + (headerHeight - playButtonSize) / 2,
     right: bounds.left + OUTER_PADDING + playButtonSize,
-    bottom: bounds.top + (headerHeight - playButtonSize) / 2 + 5 + playButtonSize,
+    bottom: bounds.top + TOP_PADDING + (headerHeight - playButtonSize) / 2 + playButtonSize,
   };
 
   const toggleModeBounds: BoundingBox = {
@@ -50,7 +52,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: playButtonBounds.bottom,
   };
 
-  const bodyTop = bounds.top + headerHeight + 8;
+  const bodyTop = bounds.top + TOP_PADDING + headerHeight + BODY_GAP;
   const laneBounds: BoundingBox = {
     left: bounds.left + OUTER_PADDING,
     top: bodyTop,
