@@ -12,12 +12,24 @@ export type MidiInstrument =
 
 export type MidiInputMode = 'tap' | 'tick';
 export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
+export type MidiConnectorNodeType = 'knob' | 'slider' | 'wave';
 
 export interface MidiLane {
   id: string;
   instrument: MidiInstrument;
   activeSteps: boolean[];
   stepVelocities: StepVelocity[];
+}
+
+export interface MidiConnectorNode {
+  id: string;
+  x: number;
+  y: number;
+  sourceLaneId?: string | null;
+  nodeType?: MidiConnectorNodeType | null;
+  value?: number;
+  pathPoints?: Array<{ x: number; y: number }>;
+  menuOpen: boolean;
 }
 
 export interface MidiElement extends TransformableElement {
@@ -38,6 +50,8 @@ export interface MidiElement extends TransformableElement {
   automationUPaths?: Array<Array<{ x: number; y: number }>>;
   automationCurvePaths?: Array<Array<{ x: number; y: number }>>;
   openInstrumentLaneId?: string | null;
+  connectorNodes?: MidiConnectorNode[];
+  masterVolume?: number;
   // Legacy fields kept optional so older saved notes can still load.
   activeSteps?: boolean[];
   stepVelocities?: StepVelocity[];
@@ -46,6 +60,7 @@ export interface MidiElement extends TransformableElement {
 
 export const DEFAULT_MIDI_STEPS = 16;
 export const DEFAULT_MIDI_TEMPO = 120;
+export const DEFAULT_MIDI_MASTER_VOLUME = 0.85;
 export const MIDI_MIN_WIDTH = 520;
 export const MIDI_MIN_HEIGHT = 108;
 export const MIDI_LANE_HEIGHT = 56;
@@ -55,6 +70,9 @@ export const MIDI_LANE_GAP = 6;
 export const MIDI_BODY_TOP_OFFSET = 12;
 export const MIDI_FOOTER_GAP = 8;
 export const MIDI_BOTTOM_PADDING = 10;
+export const MIDI_CONNECTOR_PORT_RADIUS = 8;
+export const MIDI_CONNECTOR_BUBBLE_WIDTH = 140;
+export const MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT = 28;
 export const MIDI_LANE_INSTRUMENTS: MidiInstrument[] = [
   'snare',
   'closedHat',
@@ -96,6 +114,23 @@ export function createMidiLane(
   };
 }
 
+export function createMidiConnectorNode(
+  x: number,
+  y: number,
+  sourceLaneId?: string | null
+): MidiConnectorNode {
+  return {
+    id: generateId(),
+    x,
+    y,
+    sourceLaneId: sourceLaneId ?? null,
+    nodeType: null,
+    value: DEFAULT_MIDI_MASTER_VOLUME,
+    pathPoints: [],
+    menuOpen: true,
+  };
+}
+
 export function getMidiHeightForLaneCount(laneCount: number): number {
   const laneSectionHeight =
     laneCount * MIDI_LANE_HEIGHT + Math.max(0, laneCount - 1) * MIDI_LANE_GAP;
@@ -123,6 +158,15 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
       automationEnabled: element.automationEnabled ?? false,
       stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
+      masterVolume: element.masterVolume ?? DEFAULT_MIDI_MASTER_VOLUME,
+      connectorNodes: (element.connectorNodes ?? []).map((node) => ({
+        ...node,
+        sourceLaneId: node.sourceLaneId ?? null,
+        nodeType: node.nodeType ?? null,
+        value: clampMidiControlValue(node.value ?? DEFAULT_MIDI_MASTER_VOLUME),
+        pathPoints: node.pathPoints ?? [],
+        menuOpen: Boolean(node.menuOpen),
+      })),
     };
   }
 
@@ -142,7 +186,20 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
     automationEnabled: element.automationEnabled ?? false,
     stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
     openInstrumentLaneId: null,
+    masterVolume: element.masterVolume ?? DEFAULT_MIDI_MASTER_VOLUME,
+    connectorNodes: (element.connectorNodes ?? []).map((node) => ({
+      ...node,
+      sourceLaneId: node.sourceLaneId ?? null,
+      nodeType: node.nodeType ?? null,
+      value: clampMidiControlValue(node.value ?? DEFAULT_MIDI_MASTER_VOLUME),
+      pathPoints: node.pathPoints ?? [],
+      menuOpen: Boolean(node.menuOpen),
+    })),
   };
+}
+
+function clampMidiControlValue(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 function ensureStepLength(activeSteps: boolean[], steps: number): boolean[] {
@@ -186,5 +243,7 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     automationEnabled: false,
     stepVolumes: Array.from({ length: DEFAULT_MIDI_STEPS }, () => 1.0),
     openInstrumentLaneId: null,
+    masterVolume: DEFAULT_MIDI_MASTER_VOLUME,
+    connectorNodes: [],
   };
 }

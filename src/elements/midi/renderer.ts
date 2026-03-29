@@ -5,6 +5,7 @@ import {
   MIDI_LANE_INSTRUMENTS,
   normalizeMidiElement,
   type MidiElement,
+  type MidiConnectorNodeType,
   type MidiInputMode,
   type MidiInstrument,
   type StepVelocity,
@@ -257,7 +258,8 @@ function syncPlayback(element: MidiElement, now: number): number | null {
             : lane.stepVelocities[stepIndex]
           : 'off';
       if (velocity !== 'off') {
-        const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+        const automationVolume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+        const volume = automationVolume * (normalized.masterVolume ?? 0.85);
         playLaneSound(lane.instrument, velocity, volume);
       }
     }
@@ -340,13 +342,13 @@ export function render(
 
   renderPlayButton(ctx, layout.playButtonBounds, normalized.isLooping);
   renderModeToggle(ctx, layout.toggleModeBounds, normalized.inputMode);
-
   for (const laneLayout of layout.lanes) {
     renderLane(ctx, normalized, laneLayout, currentStep, normalized.inputMode);
   }
 
   renderAddLaneButton(ctx, layout.addLaneBounds);
   renderOpenInstrumentMenu(ctx, normalized, layout);
+  renderConnectorNodes(ctx, normalized, layout);
 
   if (normalized.automationEnabled && layout.automationLaneBounds) {
     renderAutomationLane(ctx, normalized, layout);
@@ -701,6 +703,187 @@ function renderAutomationLane(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+
+  ctx.restore();
+}
+
+function renderConnectorNodes(
+  ctx: CanvasRenderingContext2D,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>
+): void {
+  const portCenter = {
+    x: layout.bounds.right - 6,
+    y: layout.bounds.top + 38,
+  };
+
+  for (const connectorLayout of layout.connectorNodes) {
+    const node = element.connectorNodes?.find((entry) => entry.id === connectorLayout.nodeId);
+    if (!node) continue;
+
+    const centerX = (connectorLayout.anchorBounds.left + connectorLayout.anchorBounds.right) / 2;
+    const centerY = (connectorLayout.anchorBounds.top + connectorLayout.anchorBounds.bottom) / 2;
+
+    ctx.save();
+    ctx.strokeStyle = '#475467';
+    ctx.lineWidth = 2;
+    renderConnectorPath(ctx, node.pathPoints ?? [], portCenter, { x: centerX, y: centerY });
+
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#2f3b52';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(
+      connectorLayout.anchorBounds.left,
+      connectorLayout.anchorBounds.top,
+      connectorLayout.anchorBounds.right - connectorLayout.anchorBounds.left,
+      connectorLayout.anchorBounds.bottom - connectorLayout.anchorBounds.top,
+      12
+    );
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#0f766e';
+    renderConnectorNodeFace(ctx, node.nodeType ?? null, node.value ?? element.masterVolume ?? 0.85, connectorLayout.anchorBounds);
+
+    if (node.menuOpen || !node.nodeType) {
+      renderConnectorBubble(ctx, connectorLayout, node.nodeType ?? undefined);
+    }
+
+    ctx.restore();
+  }
+}
+
+function renderConnectorNodeFace(
+  ctx: CanvasRenderingContext2D,
+  nodeType: MidiConnectorNodeType | null,
+  value: number,
+  bounds: BoundingBox
+): void {
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+
+  if (nodeType === 'slider') {
+    ctx.strokeStyle = '#94a3b8';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bounds.left + 8, centerY);
+    ctx.lineTo(bounds.right - 8, centerY);
+    ctx.stroke();
+
+    const handleX = bounds.left + 8 + (bounds.right - bounds.left - 16) * value;
+    ctx.fillStyle = '#0f766e';
+    ctx.beginPath();
+    ctx.roundRect(handleX - 5, centerY - 10, 10, 20, 4);
+    ctx.fill();
+    return;
+  }
+
+  if (nodeType === 'knob') {
+    const radius = Math.min(bounds.right - bounds.left, bounds.bottom - bounds.top) * 0.34;
+    const centerX = (bounds.left + bounds.right) / 2;
+    const centerY = (bounds.top + bounds.bottom) / 2;
+
+    ctx.fillStyle = '#f5efe3';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#8b6f47';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#d6c2a1';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#7a5e3b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const angle = -Math.PI * 0.75 + value * Math.PI * 1.5;
+    ctx.strokeStyle = '#245c54';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY);
+    ctx.lineTo(centerX + Math.cos(angle) * (radius - 6), centerY + Math.sin(angle) * (radius - 6));
+    ctx.stroke();
+
+    ctx.fillStyle = '#245c54';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (nodeType === 'wave') {
+    ctx.strokeStyle = '#0f766e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20;
+      const x = bounds.left + 6 + t * (bounds.right - bounds.left - 12);
+      const y = centerY + Math.sin(t * Math.PI * 2) * 6;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    return;
+  }
+
+  ctx.fillStyle = '#0f766e';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('?', centerX, centerY);
+}
+
+function renderConnectorPath(
+  ctx: CanvasRenderingContext2D,
+  pathPoints: Array<{ x: number; y: number }>,
+  fallbackStart: { x: number; y: number },
+  fallbackEnd: { x: number; y: number }
+): void {
+  const points = pathPoints.length >= 2 ? pathPoints : [fallbackStart, fallbackEnd];
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.stroke();
+}
+
+function renderConnectorBubble(
+  ctx: CanvasRenderingContext2D,
+  connectorLayout: ReturnType<typeof getMidiLayout>['connectorNodes'][number],
+  selectedType?: MidiConnectorNodeType | null
+): void {
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 250, 240, 0.98)';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.roundRect(
+    connectorLayout.bubbleBounds.left,
+    connectorLayout.bubbleBounds.top,
+    connectorLayout.bubbleBounds.right - connectorLayout.bubbleBounds.left,
+    connectorLayout.bubbleBounds.bottom - connectorLayout.bubbleBounds.top,
+    10
+  );
+  ctx.fill();
+  ctx.stroke();
+
+  (['knob', 'slider', 'wave'] as const).forEach((option) => {
+    const bounds = connectorLayout.optionBounds[option];
+    if (selectedType === option) {
+      ctx.fillStyle = 'rgba(15, 118, 110, 0.12)';
+      ctx.fillRect(bounds.left + 1, bounds.top + 1, bounds.right - bounds.left - 2, bounds.bottom - bounds.top - 2);
+    }
+    ctx.fillStyle = '#2f3b52';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(option === 'wave' ? 'Wave Visual' : option[0].toUpperCase() + option.slice(1), bounds.left + 12, (bounds.top + bounds.bottom) / 2);
+  });
 
   ctx.restore();
 }

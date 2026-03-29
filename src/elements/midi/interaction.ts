@@ -11,6 +11,7 @@ import {
 import { primeMidiAudio } from './renderer';
 import {
   createMidiLane,
+  createMidiConnectorNode,
   getMidiHeightForLaneCount,
   MIDI_LANE_INSTRUMENTS,
   MIDI_MIN_HEIGHT,
@@ -22,6 +23,9 @@ const MIN_MIDI_WIDTH = 320;
 const AUTOMATION_GAP = 8;
 const AUTOMATION_HEIGHT = 80;
 const MENU_ROW_HEIGHT = 22;
+const CONNECTOR_MIN_STROKE_LENGTH = 22;
+const CONNECTOR_EDGE_REACH = 18;
+const CONNECTOR_RIGHT_EDGE_BIAS = 28;
 
 function boundingBoxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
@@ -120,6 +124,15 @@ function getStrokeCenter(stroke: Stroke): Offset | null {
   };
 }
 
+function getStrokeEndpoints(stroke: Stroke): { start: Offset; end: Offset } | null {
+  const points = stroke.inputs.inputs;
+  if (points.length === 0) return null;
+  return {
+    start: { x: points[0].x, y: points[0].y },
+    end: { x: points[points.length - 1].x, y: points[points.length - 1].y },
+  };
+}
+
 function getCoverageRatio(strokes: Stroke[], bounds: BoundingBox): number {
   if (typeof document === 'undefined') return 0;
 
@@ -191,6 +204,118 @@ function togglePlayState(element: MidiElement): MidiElement {
   return {
     ...element,
     isLooping: !element.isLooping,
+  };
+}
+
+function closeConnectorMenus(element: MidiElement): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+      ...node,
+      menuOpen: false,
+    })),
+  };
+}
+
+function selectConnectorType(
+  element: MidiElement,
+  nodeId: string,
+  nodeType: 'knob' | 'slider' | 'wave'
+): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+      ...node,
+      nodeType: node.id === nodeId ? nodeType : node.nodeType ?? null,
+      menuOpen: node.id === nodeId ? false : false,
+    })),
+  };
+}
+
+function createConnectorFromStroke(element: MidiElement, stroke: Stroke): MidiElement | null {
+  const normalized = normalizeMidiElement(element);
+  const midiBounds = getMidiBounds(normalized);
+  const endpoints = getStrokeEndpoints(stroke);
+  if (!endpoints) return null;
+  if (getStrokePathLength(stroke) < CONNECTOR_MIN_STROKE_LENGTH) return null;
+
+  const points = stroke.inputs.inputs;
+  const startNearMidi =
+    endpoints.start.x >= midiBounds.left - CONNECTOR_EDGE_REACH &&
+    endpoints.start.x <= midiBounds.right + CONNECTOR_EDGE_REACH &&
+    endpoints.start.y >= midiBounds.top - CONNECTOR_EDGE_REACH &&
+    endpoints.start.y <= midiBounds.bottom + CONNECTOR_EDGE_REACH;
+
+  const touchesMidiEdge = points.some(
+    (point) =>
+      point.x >= midiBounds.left - CONNECTOR_EDGE_REACH &&
+      point.x <= midiBounds.right + CONNECTOR_EDGE_REACH &&
+      point.y >= midiBounds.top - CONNECTOR_EDGE_REACH &&
+      point.y <= midiBounds.bottom + CONNECTOR_EDGE_REACH
+  );
+
+  const touchesRightEdge = points.some(
+    (point) =>
+      Math.abs(point.x - midiBounds.right) <= CONNECTOR_RIGHT_EDGE_BIAS &&
+      point.y >= midiBounds.top - CONNECTOR_EDGE_REACH &&
+      point.y <= midiBounds.bottom + CONNECTOR_EDGE_REACH
+  );
+
+  if (!startNearMidi && !touchesMidiEdge && !touchesRightEdge) return null;
+
+  const endsOutsideMidi =
+    endpoints.end.x < midiBounds.left ||
+    endpoints.end.x > midiBounds.right ||
+    endpoints.end.y < midiBounds.top ||
+    endpoints.end.y > midiBounds.bottom;
+  if (!endsOutsideMidi) return null;
+
+  const connectorNode = createMidiConnectorNode(endpoints.end.x, endpoints.end.y);
+  connectorNode.pathPoints = stroke.inputs.inputs.map((point) => ({ x: point.x, y: point.y }));
+  return {
+    ...closeConnectorMenus(normalized),
+    connectorNodes: [...(normalized.connectorNodes ?? []), connectorNode],
+    openInstrumentLaneId: null,
+  };
+}
+
+function updateConnectorValueFromPoint(
+  element: MidiElement,
+  nodeId: string,
+  point: Offset,
+  layout = getMidiLayout(normalizeMidiElement(element))
+): MidiElement | null {
+  const normalized = normalizeMidiElement(element);
+  const connectorLayout = layout.connectorNodes.find((node) => node.nodeId === nodeId);
+  const connectorNode = normalized.connectorNodes?.find((node) => node.id === nodeId);
+  if (!connectorLayout || !connectorNode?.nodeType || connectorNode.nodeType === 'wave') return null;
+
+  let nextValue = connectorNode.value ?? normalized.masterVolume ?? 0.85;
+
+  if (connectorNode.nodeType === 'slider') {
+    const ratio =
+      (point.x - connectorLayout.anchorBounds.left) /
+      (connectorLayout.anchorBounds.right - connectorLayout.anchorBounds.left);
+    nextValue = Math.max(0, Math.min(1, ratio));
+  } else if (connectorNode.nodeType === 'knob') {
+    const ratio =
+      1 -
+      (point.y - connectorLayout.anchorBounds.top) /
+        (connectorLayout.anchorBounds.bottom - connectorLayout.anchorBounds.top);
+    nextValue = Math.max(0, Math.min(1, ratio));
+  }
+
+  return {
+    ...normalized,
+    masterVolume: nextValue,
+    connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+      ...node,
+      value: node.id === nodeId ? nextValue : node.value ?? normalized.masterVolume ?? 0.85,
+      menuOpen: node.id === nodeId ? node.menuOpen : false,
+    })),
+    openInstrumentLaneId: null,
   };
 }
 
@@ -366,6 +491,14 @@ export async function acceptInk(
 
   if (strokes.length === 1) {
     const center = getStrokeCenter(strokes[0]);
+    const connectorFromStroke = createConnectorFromStroke(normalized, strokes[0]);
+    if (connectorFromStroke) {
+      return {
+        element: connectorFromStroke,
+        consumed: true,
+        strokesConsumed: strokes,
+      };
+    }
 
     if (center && pointInBounds(center, layout.playButtonBounds)) {
       await primeMidiAudio();
@@ -390,6 +523,46 @@ export async function acceptInk(
         consumed: true,
         strokesConsumed: strokes,
       };
+    }
+
+    for (const connectorLayout of layout.connectorNodes) {
+      const connectorNode = normalized.connectorNodes?.find((entry) => entry.id === connectorLayout.nodeId);
+      if (center && pointInBounds(center, connectorLayout.anchorBounds)) {
+        const adjusted = connectorNode?.nodeType
+          ? updateConnectorValueFromPoint(normalized, connectorLayout.nodeId, center, layout)
+          : null;
+        if (adjusted) {
+          return {
+            element: adjusted,
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        }
+
+        return {
+          element: {
+            ...normalized,
+            connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+              ...node,
+              menuOpen: node.id === connectorLayout.nodeId ? !node.menuOpen : false,
+            })),
+            openInstrumentLaneId: null,
+          },
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
+
+      const selectedOption = (['knob', 'slider', 'wave'] as const).find((option) =>
+        center ? pointInBounds(center, connectorLayout.optionBounds[option]) : false
+      );
+      if (selectedOption) {
+        return {
+          element: selectConnectorType(normalized, connectorLayout.nodeId, selectedOption),
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
     }
 
     for (const laneLayout of layout.lanes) {
@@ -428,7 +601,7 @@ export async function acceptInk(
         if (pointInBounds(center, getMidiInteractionBounds(normalized))) {
           return {
             element: {
-              ...normalized,
+              ...closeConnectorMenus(normalized),
               openInstrumentLaneId: null,
             },
             consumed: true,
@@ -441,7 +614,27 @@ export async function acceptInk(
     for (const laneLayout of layout.lanes) {
       if (center && pointInBounds(center, laneLayout.instrumentBounds)) {
         return {
-          element: toggleInstrumentMenu(normalized, laneLayout.laneIndex),
+          element: closeConnectorMenus(toggleInstrumentMenu(normalized, laneLayout.laneIndex)),
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
+    }
+  }
+
+  for (const connectorLayout of layout.connectorNodes) {
+    const connectorNode = normalized.connectorNodes?.find((entry) => entry.id === connectorLayout.nodeId);
+    if (!connectorNode?.nodeType || connectorNode.nodeType === 'wave') continue;
+
+    const strokePoint = strokes[0]?.inputs.inputs[strokes[0].inputs.inputs.length - 1];
+    if (!strokePoint) continue;
+    const point = { x: strokePoint.x, y: strokePoint.y };
+    const strokeBounds = getStrokeBounds(strokes[0]);
+    if (strokeBounds && boundingBoxesOverlap(strokeBounds, connectorLayout.anchorBounds)) {
+      const adjusted = updateConnectorValueFromPoint(normalized, connectorLayout.nodeId, point, layout);
+      if (adjusted) {
+        return {
+          element: adjusted,
           consumed: true,
           strokesConsumed: strokes,
         };
@@ -466,6 +659,10 @@ export async function acceptInk(
           stepVolumes: updatedVolumes,
           automationCurvePaths: curvePaths,
           openInstrumentLaneId: null,
+          connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+            ...node,
+            menuOpen: false,
+          })),
         },
         consumed: true,
         strokesConsumed: strokesInLane,
@@ -501,7 +698,7 @@ export async function acceptInk(
 
       return {
         element: {
-          ...normalized,
+          ...closeConnectorMenus(normalized),
           automationEnabled: true,
           automationTopY: automationTop,
           automationBottomY: automationTop + drawnHeight,
@@ -612,6 +809,10 @@ export async function acceptInk(
       ...normalized,
       lanes,
       openInstrumentLaneId: null,
+      connectorNodes: (normalized.connectorNodes ?? []).map((node) => ({
+        ...node,
+        menuOpen: false,
+      })),
     },
     consumed: true,
     strokesConsumed: strokes,

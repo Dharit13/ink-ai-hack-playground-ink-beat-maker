@@ -3,6 +3,8 @@ import type { MidiElement } from './types';
 import {
   MIDI_ADD_BUTTON_SIZE,
   MIDI_BODY_TOP_OFFSET,
+  MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT,
+  MIDI_CONNECTOR_BUBBLE_WIDTH,
   MIDI_FOOTER_GAP,
   MIDI_HEADER_HEIGHT,
   MIDI_LANE_GAP,
@@ -28,6 +30,14 @@ export interface MidiLayout {
   lanes: MidiLaneLayout[];
   headerHeight: number;
   automationLaneBounds?: BoundingBox;
+  connectorNodes: MidiConnectorLayout[];
+}
+
+export interface MidiConnectorLayout {
+  nodeId: string;
+  anchorBounds: BoundingBox;
+  bubbleBounds: BoundingBox;
+  optionBounds: Record<'knob' | 'slider' | 'wave', BoundingBox>;
 }
 
 const OUTER_PADDING = 10;
@@ -40,6 +50,7 @@ const TOGGLE_BUTTON_WIDTH = 38;
 const CONTROL_HIT_PADDING = 8;
 const AUTOMATION_GAP = 8;
 const AUTOMATION_ZONE_REACH = 220;
+const CONNECTOR_NODE_SIZE = 64;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
   const normalized = normalizeMidiElement(element);
@@ -137,6 +148,48 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
         }
       : undefined;
 
+  const connectorNodes: MidiConnectorLayout[] = (normalized.connectorNodes ?? []).map((node) => {
+    const anchorBounds: BoundingBox = {
+      left: node.x - CONNECTOR_NODE_SIZE / 2,
+      top: node.y - CONNECTOR_NODE_SIZE / 2,
+      right: node.x + CONNECTOR_NODE_SIZE / 2,
+      bottom: node.y + CONNECTOR_NODE_SIZE / 2,
+    };
+    const bubbleBounds: BoundingBox = {
+      left: anchorBounds.right + 10,
+      top: node.y - (MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 3) / 2 - 6,
+      right: anchorBounds.right + 10 + MIDI_CONNECTOR_BUBBLE_WIDTH,
+      bottom: node.y + (MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 3) / 2 + 6,
+    };
+    const optionBounds = {
+      knob: {
+        left: bubbleBounds.left,
+        top: bubbleBounds.top,
+        right: bubbleBounds.right,
+        bottom: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT,
+      },
+      slider: {
+        left: bubbleBounds.left,
+        top: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT,
+        right: bubbleBounds.right,
+        bottom: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 2,
+      },
+      wave: {
+        left: bubbleBounds.left,
+        top: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 2,
+        right: bubbleBounds.right,
+        bottom: bubbleBounds.bottom,
+      },
+    };
+
+    return {
+      nodeId: node.id,
+      anchorBounds,
+      bubbleBounds,
+      optionBounds,
+    };
+  });
+
   return {
     bounds,
     playButtonBounds,
@@ -145,6 +198,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     lanes,
     headerHeight,
     automationLaneBounds,
+    connectorNodes,
   };
 }
 
@@ -221,6 +275,15 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
     controlBounds.push(expandBounds(layout.automationLaneBounds, CONTROL_HIT_PADDING));
   } else {
     controlBounds.push(expandBounds(getAutomationZoneBounds(normalized), CONTROL_HIT_PADDING));
+  }
+
+  for (const connectorNode of layout.connectorNodes) {
+    controlBounds.push(expandBounds(connectorNode.anchorBounds, CONTROL_HIT_PADDING));
+    if (
+      normalized.connectorNodes?.find((node) => node.id === connectorNode.nodeId)?.menuOpen
+    ) {
+      controlBounds.push(expandBounds(connectorNode.bubbleBounds, CONTROL_HIT_PADDING));
+    }
   }
 
   for (const bounds of controlBounds) {
