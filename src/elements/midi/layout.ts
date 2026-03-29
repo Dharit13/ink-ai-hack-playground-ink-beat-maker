@@ -25,6 +25,8 @@ export interface MidiLayout {
   playButtonBounds: BoundingBox;
   toggleModeBounds: BoundingBox;
   headerTextBounds: BoundingBox;
+  tempoDisplayBounds: BoundingBox;
+  tapTempoButtonBounds: BoundingBox;
   addLaneBounds: BoundingBox;
   lanes: MidiLaneLayout[];
   headerHeight: number;
@@ -39,6 +41,8 @@ const LANE_LABEL_WIDTH = 132;
 const REMOVE_BUTTON_SIZE = 14;
 const MENU_ROW_HEIGHT = 22;
 const TOGGLE_BUTTON_WIDTH = 50;
+const TEMPO_DISPLAY_WIDTH = 58;
+const TAP_TEMPO_BUTTON_WIDTH = 42;
 const HEADER_TEXT_GAP = 16;
 const CONTROL_HIT_PADDING = 8;
 const AUTOMATION_GAP = 8;
@@ -82,8 +86,22 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   const headerTextBounds: BoundingBox = {
     left: toggleModeBounds.right + HEADER_TEXT_GAP,
     top: bounds.top + 6,
-    right: bounds.right - OUTER_PADDING,
+    right: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH - CONTROL_GAP - TEMPO_DISPLAY_WIDTH - CONTROL_GAP,
     bottom: bounds.top + headerHeight - 4,
+  };
+
+  const tapTempoButtonBounds: BoundingBox = {
+    left: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH,
+    top: playButtonBounds.top,
+    right: bounds.right - OUTER_PADDING,
+    bottom: playButtonBounds.bottom,
+  };
+
+  const tempoDisplayBounds: BoundingBox = {
+    left: tapTempoButtonBounds.left - CONTROL_GAP - TEMPO_DISPLAY_WIDTH,
+    top: playButtonBounds.top,
+    right: tapTempoButtonBounds.left - CONTROL_GAP,
+    bottom: playButtonBounds.bottom,
   };
 
   for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
@@ -148,6 +166,8 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     playButtonBounds,
     toggleModeBounds,
     headerTextBounds,
+    tempoDisplayBounds,
+    tapTempoButtonBounds,
     addLaneBounds,
     lanes,
     headerHeight,
@@ -208,6 +228,7 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
   const controlBounds = [
     expandBounds(layout.playButtonBounds, CONTROL_HIT_PADDING),
     expandBounds(layout.toggleModeBounds, CONTROL_HIT_PADDING),
+    expandBounds(layout.tapTempoButtonBounds, CONTROL_HIT_PADDING),
     expandBounds(layout.addLaneBounds, CONTROL_HIT_PADDING),
     ...layout.lanes.flatMap((lane) => [
       expandBounds(lane.instrumentBounds, CONTROL_HIT_PADDING),

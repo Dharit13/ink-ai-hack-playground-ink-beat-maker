@@ -350,13 +350,15 @@ export function render(
   ctx.fillStyle = '#64748b';
   ctx.font = '14px "Caveat", cursive';
   ctx.fillText(
-    `${normalized.steps} steps · ${normalized.tempo} BPM · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
+    `${normalized.steps} steps · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
     layout.headerTextBounds.left,
     layout.headerTextBounds.top + 16
   );
 
   renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
   renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
+  renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
+  renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed);
 
   for (const laneLayout of layout.lanes) {
     renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
@@ -432,6 +434,43 @@ function renderModeToggle(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  ctx.restore();
+}
+
+function renderTempoDisplay(
+  ctx: CanvasRenderingContext2D,
+  bounds: BoundingBox,
+  tempo: number
+): void {
+  ctx.save();
+  ctx.fillStyle = '#475569';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 15px "Caveat", cursive';
+  ctx.fillText(`${tempo} BPM`, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
+  ctx.restore();
+}
+
+function renderTapTempoButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
+  ctx.save();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed + 3)
+  );
+
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 14px "Caveat", cursive';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Tap', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
   ctx.restore();
 }
 

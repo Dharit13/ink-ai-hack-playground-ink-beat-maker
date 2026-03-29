@@ -21,6 +21,15 @@ import {
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
 const MENU_ROW_HEIGHT = 22;
+const TAP_TEMPO_IDLE_RESET_MS = 2500;
+const TAP_TEMPO_MIN_INTERVAL_MS = 250;
+const TAP_TEMPO_MAX_INTERVAL_MS = 1500;
+const TAP_TEMPO_MIN_TAPS = 3;
+const TAP_TEMPO_MAX_INTERVAL_SAMPLES = 4;
+const TAP_TEMPO_MIN_BPM = 40;
+const TAP_TEMPO_MAX_BPM = 240;
+
+const tapTempoHistory = new Map<string, number[]>();
 
 function boundingBoxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
@@ -160,6 +169,46 @@ function getCoverageRatio(strokes: Stroke[], bounds: BoundingBox): number {
   }
 
   return filledPixels / (width * height);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function applyTapTempo(element: MidiElement, tapTime: number): MidiElement {
+  const previousTaps = tapTempoHistory.get(element.id) ?? [];
+  const lastTap = previousTaps[previousTaps.length - 1];
+
+  if (lastTap === undefined || tapTime - lastTap > TAP_TEMPO_IDLE_RESET_MS) {
+    tapTempoHistory.set(element.id, [tapTime]);
+    return element;
+  }
+
+  const interval = tapTime - lastTap;
+  if (interval < TAP_TEMPO_MIN_INTERVAL_MS || interval > TAP_TEMPO_MAX_INTERVAL_MS) {
+    tapTempoHistory.set(element.id, [tapTime]);
+    return element;
+  }
+
+  const taps = [...previousTaps, tapTime].slice(-(TAP_TEMPO_MAX_INTERVAL_SAMPLES + 1));
+  tapTempoHistory.set(element.id, taps);
+
+  if (taps.length < TAP_TEMPO_MIN_TAPS) {
+    return element;
+  }
+
+  const intervals = taps.slice(1).map((value, index) => value - taps[index]);
+  const averageInterval = intervals.reduce((sum, value) => sum + value, 0) / intervals.length;
+  const nextTempo = clamp(
+    Math.round(60000 / averageInterval),
+    TAP_TEMPO_MIN_BPM,
+    TAP_TEMPO_MAX_BPM
+  );
+
+  return {
+    ...element,
+    tempo: nextTempo,
+  };
 }
 
 function getTargetCells(
@@ -364,7 +413,20 @@ export async function acceptInk(
   const mode = normalized.inputMode ?? 'tap';
 
   if (strokes.length === 1) {
-    const center = getStrokeCenter(strokes[0]);
+    const stroke = strokes[0];
+    const center = getStrokeCenter(stroke);
+
+    if (
+      center &&
+      isTapStroke(stroke) &&
+      pointInBounds(center, layout.tapTempoButtonBounds)
+    ) {
+      return {
+        element: applyTapTempo(normalized, Date.now()),
+        consumed: true,
+        strokesConsumed: strokes,
+      };
+    }
 
     if (center && pointInBounds(center, layout.playButtonBounds)) {
       await primeMidiAudio();
