@@ -12,7 +12,7 @@ export type MidiInstrument =
 
 export type MidiInputMode = 'tap' | 'tick';
 export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
-export type MidiConnectorNodeType = 'knob' | 'slider' | 'wave';
+export type MidiConnectorNodeType = 'knob' | 'slider';
 
 export interface MidiLane {
   id: string;

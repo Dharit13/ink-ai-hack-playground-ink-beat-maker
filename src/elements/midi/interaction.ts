@@ -221,7 +221,7 @@ function closeConnectorMenus(element: MidiElement): MidiElement {
 function selectConnectorType(
   element: MidiElement,
   nodeId: string,
-  nodeType: 'knob' | 'slider' | 'wave'
+  nodeType: 'knob' | 'slider'
 ): MidiElement {
   const normalized = normalizeMidiElement(element);
   return {
@@ -231,6 +231,14 @@ function selectConnectorType(
       nodeType: node.id === nodeId ? nodeType : node.nodeType ?? null,
       menuOpen: node.id === nodeId ? false : false,
     })),
+  };
+}
+
+function removeConnectorNode(element: MidiElement, nodeId: string): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    connectorNodes: (normalized.connectorNodes ?? []).filter((node) => node.id !== nodeId),
   };
 }
 
@@ -290,7 +298,7 @@ function updateConnectorValueFromPoint(
   const normalized = normalizeMidiElement(element);
   const connectorLayout = layout.connectorNodes.find((node) => node.nodeId === nodeId);
   const connectorNode = normalized.connectorNodes?.find((node) => node.id === nodeId);
-  if (!connectorLayout || !connectorNode?.nodeType || connectorNode.nodeType === 'wave') return null;
+  if (!connectorLayout || !connectorNode?.nodeType) return null;
 
   let nextValue = connectorNode.value ?? normalized.masterVolume ?? 0.85;
 
@@ -527,6 +535,13 @@ export async function acceptInk(
 
     for (const connectorLayout of layout.connectorNodes) {
       const connectorNode = normalized.connectorNodes?.find((entry) => entry.id === connectorLayout.nodeId);
+      if (center && pointInBounds(center, connectorLayout.deleteButtonBounds)) {
+        return {
+          element: removeConnectorNode(normalized, connectorLayout.nodeId),
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
       if (center && pointInBounds(center, connectorLayout.anchorBounds)) {
         const adjusted = connectorNode?.nodeType
           ? updateConnectorValueFromPoint(normalized, connectorLayout.nodeId, center, layout)
@@ -553,7 +568,7 @@ export async function acceptInk(
         };
       }
 
-      const selectedOption = (['knob', 'slider', 'wave'] as const).find((option) =>
+      const selectedOption = (['knob', 'slider'] as const).find((option) =>
         center ? pointInBounds(center, connectorLayout.optionBounds[option]) : false
       );
       if (selectedOption) {
@@ -624,7 +639,7 @@ export async function acceptInk(
 
   for (const connectorLayout of layout.connectorNodes) {
     const connectorNode = normalized.connectorNodes?.find((entry) => entry.id === connectorLayout.nodeId);
-    if (!connectorNode?.nodeType || connectorNode.nodeType === 'wave') continue;
+    if (!connectorNode?.nodeType) continue;
 
     const strokePoint = strokes[0]?.inputs.inputs[strokes[0].inputs.inputs.length - 1];
     if (!strokePoint) continue;

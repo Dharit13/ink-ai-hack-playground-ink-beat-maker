@@ -36,8 +36,9 @@ export interface MidiLayout {
 export interface MidiConnectorLayout {
   nodeId: string;
   anchorBounds: BoundingBox;
+  deleteButtonBounds: BoundingBox;
   bubbleBounds: BoundingBox;
-  optionBounds: Record<'knob' | 'slider' | 'wave', BoundingBox>;
+  optionBounds: Record<'knob' | 'slider', BoundingBox>;
 }
 
 const OUTER_PADDING = 10;
@@ -157,9 +158,15 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     };
     const bubbleBounds: BoundingBox = {
       left: anchorBounds.right + 10,
-      top: node.y - (MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 3) / 2 - 6,
+      top: node.y - MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT - 6,
       right: anchorBounds.right + 10 + MIDI_CONNECTOR_BUBBLE_WIDTH,
-      bottom: node.y + (MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 3) / 2 + 6,
+      bottom: node.y + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT + 6,
+    };
+    const deleteButtonBounds: BoundingBox = {
+      left: anchorBounds.right - 16,
+      top: anchorBounds.top + 4,
+      right: anchorBounds.right - 4,
+      bottom: anchorBounds.top + 16,
     };
     const optionBounds = {
       knob: {
@@ -172,12 +179,6 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
         left: bubbleBounds.left,
         top: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT,
         right: bubbleBounds.right,
-        bottom: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 2,
-      },
-      wave: {
-        left: bubbleBounds.left,
-        top: bubbleBounds.top + MIDI_CONNECTOR_BUBBLE_ROW_HEIGHT * 2,
-        right: bubbleBounds.right,
         bottom: bubbleBounds.bottom,
       },
     };
@@ -185,6 +186,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     return {
       nodeId: node.id,
       anchorBounds,
+      deleteButtonBounds,
       bubbleBounds,
       optionBounds,
     };
@@ -279,6 +281,7 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
 
   for (const connectorNode of layout.connectorNodes) {
     controlBounds.push(expandBounds(connectorNode.anchorBounds, CONTROL_HIT_PADDING));
+    controlBounds.push(expandBounds(connectorNode.deleteButtonBounds, CONTROL_HIT_PADDING));
     if (
       normalized.connectorNodes?.find((node) => node.id === connectorNode.nodeId)?.menuOpen
     ) {

@@ -743,8 +743,8 @@ function renderConnectorNodes(
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#0f766e';
     renderConnectorNodeFace(ctx, node.nodeType ?? null, node.value ?? element.masterVolume ?? 0.85, connectorLayout.anchorBounds);
+    renderConnectorDeleteButton(ctx, connectorLayout.deleteButtonBounds);
 
     if (node.menuOpen || !node.nodeType) {
       renderConnectorBubble(ctx, connectorLayout, node.nodeType ?? undefined);
@@ -815,26 +815,30 @@ function renderConnectorNodeFace(
     return;
   }
 
-  if (nodeType === 'wave') {
-    ctx.strokeStyle = '#0f766e';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let i = 0; i <= 20; i++) {
-      const t = i / 20;
-      const x = bounds.left + 6 + t * (bounds.right - bounds.left - 12);
-      const y = centerY + Math.sin(t * Math.PI * 2) * 6;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    return;
-  }
-
   ctx.fillStyle = '#0f766e';
   ctx.font = 'bold 10px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('?', centerX, centerY);
+}
+
+function renderConnectorDeleteButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox): void {
+  ctx.save();
+  ctx.fillStyle = '#fffaf0';
+  ctx.strokeStyle = '#c2410c';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 4);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(bounds.left + 3, bounds.top + 3);
+  ctx.lineTo(bounds.right - 3, bounds.bottom - 3);
+  ctx.moveTo(bounds.right - 3, bounds.top + 3);
+  ctx.lineTo(bounds.left + 3, bounds.bottom - 3);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function renderConnectorPath(
@@ -872,7 +876,7 @@ function renderConnectorBubble(
   ctx.fill();
   ctx.stroke();
 
-  (['knob', 'slider', 'wave'] as const).forEach((option) => {
+  (['knob', 'slider'] as const).forEach((option) => {
     const bounds = connectorLayout.optionBounds[option];
     if (selectedType === option) {
       ctx.fillStyle = 'rgba(15, 118, 110, 0.12)';
@@ -882,7 +886,7 @@ function renderConnectorBubble(
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(option === 'wave' ? 'Wave Visual' : option[0].toUpperCase() + option.slice(1), bounds.left + 12, (bounds.top + bounds.bottom) / 2);
+    ctx.fillText(option[0].toUpperCase() + option.slice(1), bounds.left + 12, (bounds.top + bounds.bottom) / 2);
   });
 
   ctx.restore();
