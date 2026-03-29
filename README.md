@@ -27,6 +27,13 @@ Required variables:
 
 You'll need a running instance of the recognition API. Set the URL in your `.env` file.
 
+### Git Hooks
+
+Activate the pre-push hook once after cloning (blocks pushing if lint or build fails):
+```bash
+npm run setup
+```
+
 ### Running
 ```bash
 npm run dev      # Start dev server, accessible on the local network
