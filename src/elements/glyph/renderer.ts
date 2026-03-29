@@ -9,7 +9,6 @@ import type { RenderOptions } from '../registry/ElementPlugin';
 export function render(
   ctx: CanvasRenderingContext2D,
   element: GlyphElement,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _options?: RenderOptions
 ): void {
   ctx.save();

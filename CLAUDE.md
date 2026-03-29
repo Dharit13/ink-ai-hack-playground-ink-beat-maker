@@ -56,6 +56,7 @@ Run `npm run setup` once after cloning to activate it (`git config core.hooksPat
 - **Interaction**: `isInterestedIn()` → `acceptInk()` pipeline for elements that respond to additional ink
 - **Handle-based interaction**: `getHandles()` + `onHandleDrag()` for drag-based manipulation (e.g., image resizing)
 - **Palette entries**: Elements can register in the rectangle+X gesture menu via `registerPaletteEntry()`
+- **Unused stub params**: Plugin interface methods (`renderer.ts`, `interaction.ts`, `creator.ts`) often have required parameters unused in a given implementation. Prefix these with `_` (e.g. `_options`, `_recognitionResult`, `_context`) — ESLint is configured to allow this pattern.
 
 **Dual Canvas Rendering**: Main canvas renders completed elements (noteElements), overlay canvas renders in-progress strokes and selection marquee.
 

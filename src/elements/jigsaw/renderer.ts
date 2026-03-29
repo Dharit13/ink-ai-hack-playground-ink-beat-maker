@@ -3,7 +3,6 @@
 import type { BoundingBox } from '../../types';
 import type { JigsawElement, JigsawGameState, JigsawPiece } from './types';
 import type { RenderOptions } from '../registry/ElementPlugin';
-import { getTargetPosition } from './gameState';
 
 const BORDER_COLOR = '#333333';
 const BORDER_WIDTH = 2.5;

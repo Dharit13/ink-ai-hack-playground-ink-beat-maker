@@ -114,7 +114,6 @@ export function generatePuzzle(
   seed: number,
 ): Pick<QueensGameState, 'size' | 'regions' | 'seed'> {
   for (let attempt = 0; attempt < 200; attempt++) {
-    const rng = createRng(seed + attempt * 1009);
     const queens = findQueenPlacement(n, createRng(seed + attempt * 997));
     if (!queens) continue;
     const rng2 = createRng(seed + attempt * 1009 + 1);

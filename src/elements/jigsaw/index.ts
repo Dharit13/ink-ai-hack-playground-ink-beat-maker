@@ -13,7 +13,7 @@ import { checkSnap, getTargetPosition, checkAllPlaced } from './gameState';
 import type { Element } from '../../types/elements';
 import { getElementBounds } from '../registry/ElementRegistry';
 
-import { JIGSAW_ROWS, JIGSAW_COLS, PUZZLE_SIZE, ELEMENT_WIDTH, ELEMENT_HEIGHT, PUZZLE_LEFT, PUZZLE_TOP } from './constants';
+import { ELEMENT_WIDTH, ELEMENT_HEIGHT } from './constants';
 
 const ORIGIN_SNAP_GRID = 50;
 
@@ -71,7 +71,7 @@ const jigsawPlugin: ElementPlugin<JigsawElement> = {
     if (pieceIdx === -1) return element;
 
     const piece = element.gameState.pieces[pieceIdx];
-    const { pieceWidth, pieceHeight } = element.gameState;
+    const { pieceWidth: _pieceWidth, pieceHeight: _pieceHeight } = element.gameState;
 
     if (phase === 'start') {
       dragState.set(element.id, {

@@ -19,8 +19,6 @@ const SOLVED_FILL = 'rgba(0, 180, 0, 0.10)';
 const SUN_FILL = '#FFB300';
 const SUN_STROKE = '#F57F17';
 const SUN_RAY_COLOR = '#FFA000';
-const MOON_FILL = '#5C6BC0';
-const MOON_STROKE = '#303F9F';
 const SYMBOL_LINE_WIDTH = 2.5;
 
 const CONSTRAINT_EQUAL_COLOR = '#666666';

@@ -91,7 +91,6 @@ function getStrokesBounds(strokes: Stroke[]): BoundingBox | null {
  * Estimate the writing angle from strokes (for horizontal text).
  * Returns angle in radians (0 = horizontal).
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function estimateWritingAngle(_strokes: Stroke[]): number {
   // Simple approach: fit a line through stroke centroids
   // For now, assume horizontal writing (angle = 0)
