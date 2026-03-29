@@ -1,21 +1,27 @@
 import type { BoundingBox } from '../../types';
 import type { HandleDescriptor, RenderOptions } from '../registry/ElementPlugin';
-import type { MidiElement, MidiInputMode, StepVelocity } from './types';
-import { getMidiBounds, getMidiLayout } from './layout';
+import { getMidiBounds, getMidiInteractionBounds, getMidiLayout } from './layout';
 import {
   getRoughCanvas,
   seedFromId,
-  sketchContainer,
-  sketchLane,
-  sketchButtonIdle,
+  sketchAutoBorder,
   sketchButtonActive,
-  sketchStepActive,
+  sketchButtonIdle,
+  sketchContainer,
   sketchGridMajor,
   sketchGridMinor,
-  sketchAutoBorder,
-  sketchVolBox,
   sketchTickLine,
+  sketchVolBox,
 } from './sketchUtils';
+import {
+  getInstrumentLabel,
+  MIDI_LANE_INSTRUMENTS,
+  normalizeMidiElement,
+  type MidiElement,
+  type MidiInputMode,
+  type MidiInstrument,
+  type StepVelocity,
+} from './types';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -27,14 +33,59 @@ let currentFrameTime = 0;
 let seenThisFrame = new Set<string>();
 
 let audioContext: AudioContext | null = null;
+let masterGainNode: GainNode | null = null;
+let compressorNode: DynamicsCompressorNode | null = null;
+let noiseBuffer: AudioBuffer | null = null;
+
+const MASTER_OUTPUT_GAIN = 1.9;
+const VELOCITY_GAIN: Record<StepVelocity, number> = {
+  off: 0,
+  low: 0.12,
+  normal: 0.24,
+  high: 0.4,
+};
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (audioContext) return audioContext;
-
   if (!window.AudioContext) return null;
   audioContext = new window.AudioContext();
   return audioContext;
+}
+
+function getOutputNode(context: AudioContext): AudioNode {
+  if (!compressorNode) {
+    compressorNode = context.createDynamicsCompressor();
+    compressorNode.threshold.setValueAtTime(-18, context.currentTime);
+    compressorNode.knee.setValueAtTime(12, context.currentTime);
+    compressorNode.ratio.setValueAtTime(3, context.currentTime);
+    compressorNode.attack.setValueAtTime(0.003, context.currentTime);
+    compressorNode.release.setValueAtTime(0.12, context.currentTime);
+  }
+
+  if (!masterGainNode) {
+    masterGainNode = context.createGain();
+    masterGainNode.gain.setValueAtTime(MASTER_OUTPUT_GAIN, context.currentTime);
+  }
+
+  masterGainNode.disconnect();
+  compressorNode.disconnect();
+  masterGainNode.connect(compressorNode);
+  compressorNode.connect(context.destination);
+
+  return masterGainNode;
+}
+
+function getNoiseBuffer(context: AudioContext): AudioBuffer {
+  if (noiseBuffer) return noiseBuffer;
+
+  const bufferSize = context.sampleRate;
+  noiseBuffer = context.createBuffer(1, bufferSize, context.sampleRate);
+  const channelData = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) {
+    channelData[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuffer;
 }
 
 export async function primeMidiAudio(): Promise<void> {
@@ -45,53 +96,145 @@ export async function primeMidiAudio(): Promise<void> {
   }
 }
 
-const VELOCITY_GAIN: Record<StepVelocity, number> = {
-  off: 0,
-  low: 0.08,
-  normal: 0.2,
-  high: 0.4,
-};
+function getInstrumentSoundProfile(instrument: MidiInstrument): {
+  frequency: number;
+  endFrequency: number;
+  filterFrequency: number;
+  duration: number;
+  type: OscillatorType;
+} {
+  switch (instrument) {
+    case 'kick':
+      return { frequency: 120, endFrequency: 48, filterFrequency: 240, duration: 0.18, type: 'sine' };
+    case 'snare':
+      return { frequency: 220, endFrequency: 130, filterFrequency: 1800, duration: 0.12, type: 'triangle' };
+    case 'closedHat':
+      return { frequency: 520, endFrequency: 440, filterFrequency: 5000, duration: 0.05, type: 'square' };
+    case 'openHat':
+      return { frequency: 540, endFrequency: 420, filterFrequency: 4200, duration: 0.12, type: 'square' };
+    case 'tom':
+      return { frequency: 170, endFrequency: 98, filterFrequency: 700, duration: 0.16, type: 'triangle' };
+    case 'midTom':
+      return { frequency: 145, endFrequency: 85, filterFrequency: 600, duration: 0.16, type: 'triangle' };
+    case 'crash':
+      return { frequency: 460, endFrequency: 330, filterFrequency: 3200, duration: 0.2, type: 'sawtooth' };
+  }
+}
 
-function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal', stepIndex = -1): void {
+function playNoiseInstrument(
+  context: AudioContext,
+  instrument: MidiInstrument,
+  effectiveGain: number
+): void {
+  const noise = context.createBufferSource();
+  noise.buffer = getNoiseBuffer(context);
+
+  const noiseFilter = context.createBiquadFilter();
+  const noiseGain = context.createGain();
+  const outputNode = getOutputNode(context);
+  const now = context.currentTime;
+
+  noiseFilter.type = instrument === 'snare' ? 'highpass' : 'bandpass';
+
+  switch (instrument) {
+    case 'snare':
+      noiseFilter.frequency.setValueAtTime(1800, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.6 * effectiveGain, now + 0.003);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      break;
+    case 'closedHat':
+      noiseFilter.frequency.setValueAtTime(7000, now);
+      noiseFilter.Q.setValueAtTime(2.5, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.34 * effectiveGain, now + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+      break;
+    case 'openHat':
+      noiseFilter.frequency.setValueAtTime(5200, now);
+      noiseFilter.Q.setValueAtTime(1.6, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.28 * effectiveGain, now + 0.002);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+      break;
+    case 'crash':
+      noiseFilter.frequency.setValueAtTime(3600, now);
+      noiseFilter.Q.setValueAtTime(1.1, now);
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.32 * effectiveGain, now + 0.003);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      break;
+  }
+
+  noise.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(outputNode);
+  noise.start(now);
+  noise.stop(now + 0.3);
+
+  if (instrument === 'snare') {
+    const snapOsc = context.createOscillator();
+    const snapGain = context.createGain();
+    snapOsc.type = 'triangle';
+    snapOsc.frequency.setValueAtTime(180, now);
+    snapOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+    snapGain.gain.setValueAtTime(0.0001, now);
+    snapGain.gain.exponentialRampToValueAtTime(0.22 * effectiveGain, now + 0.002);
+    snapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    snapOsc.connect(snapGain);
+    snapGain.connect(outputNode);
+    snapOsc.start(now);
+    snapOsc.stop(now + 0.1);
+  }
+}
+
+function playLaneSound(instrument: MidiInstrument, velocity: StepVelocity, volume = 1): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
 
-  const peakGain = VELOCITY_GAIN[velocity];
-  if (peakGain === 0) return;
+  const velocityGain = VELOCITY_GAIN[velocity];
+  if (velocityGain <= 0) return;
+  const effectiveGain = velocityGain * volume;
 
-  const automationVolume =
-    element.automationEnabled && stepIndex >= 0
-      ? (element.stepVolumes?.[stepIndex] ?? 1.0)
-      : 1.0;
-  const effectiveGain = peakGain * automationVolume;
+  if (
+    instrument === 'snare' ||
+    instrument === 'closedHat' ||
+    instrument === 'openHat' ||
+    instrument === 'crash'
+  ) {
+    playNoiseInstrument(context, instrument, effectiveGain);
+    return;
+  }
 
+  const profile = getInstrumentSoundProfile(instrument);
   const now = context.currentTime;
   const oscillator = context.createOscillator();
   const gainNode = context.createGain();
   const filter = context.createBiquadFilter();
+  const outputNode = getOutputNode(context);
 
-  oscillator.type = 'triangle';
-  oscillator.frequency.setValueAtTime(220, now);
-  oscillator.frequency.exponentialRampToValueAtTime(130, now + 0.08);
+  oscillator.type = profile.type;
+  oscillator.frequency.setValueAtTime(profile.frequency, now);
+  oscillator.frequency.exponentialRampToValueAtTime(profile.endFrequency, now + profile.duration * 0.75);
 
   filter.type = 'bandpass';
-  filter.frequency.setValueAtTime(element.instrument === 'snare' ? 1800 : 900, now);
+  filter.frequency.setValueAtTime(profile.filterFrequency, now);
   filter.Q.setValueAtTime(0.8, now);
 
   gainNode.gain.setValueAtTime(0.0001, now);
   gainNode.gain.exponentialRampToValueAtTime(effectiveGain, now + 0.005);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + profile.duration);
 
   oscillator.connect(filter);
   filter.connect(gainNode);
-  gainNode.connect(context.destination);
+  gainNode.connect(outputNode);
 
   oscillator.start(now);
-  oscillator.stop(now + 0.13);
+  oscillator.stop(now + profile.duration + 0.02);
 }
 
 function getStepDurationMs(element: MidiElement): number {
-  return 60000 / element.tempo / 4;
+  return 60000 / normalizeMidiElement(element).tempo / 4;
 }
 
 function getCurrentStepIndex(element: MidiElement, now: number): number {
@@ -99,35 +242,37 @@ function getCurrentStepIndex(element: MidiElement, now: number): number {
   if (!runtime) return 0;
 
   const elapsed = Math.max(0, now - runtime.startedAt);
-  return Math.floor(elapsed / getStepDurationMs(element)) % element.steps;
+  return Math.floor(elapsed / getStepDurationMs(element)) % normalizeMidiElement(element).steps;
 }
 
 function syncPlayback(element: MidiElement, now: number): number | null {
-  if (!element.isLooping) {
-    playbackState.delete(element.id);
+  const normalized = normalizeMidiElement(element);
+  if (!normalized.isLooping) {
+    playbackState.delete(normalized.id);
     return null;
   }
 
-  const runtime = playbackState.get(element.id) ?? {
+  const runtime = playbackState.get(normalized.id) ?? {
     startedAt: now,
     lastTriggeredStep: -1,
   };
-  playbackState.set(element.id, runtime);
+  playbackState.set(normalized.id, runtime);
 
-  const stepIndex = getCurrentStepIndex(element, now);
+  const stepIndex = getCurrentStepIndex(normalized, now);
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
-    const mode = element.inputMode ?? 'tap';
-    const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
-    if (mode === 'tick') {
-      const vel = velocities[stepIndex];
-      if (vel !== 'off') {
-        playStepSound(element, vel, stepIndex);
-      }
-    } else {
-      if (element.activeSteps[stepIndex]) {
-        const vel = velocities[stepIndex] !== 'off' ? velocities[stepIndex] : 'normal';
-        playStepSound(element, vel, stepIndex);
+    for (const lane of normalized.lanes) {
+      const velocity =
+        normalized.inputMode === 'tick'
+          ? lane.stepVelocities[stepIndex]
+          : lane.activeSteps[stepIndex]
+            ? lane.stepVelocities[stepIndex] === 'off'
+              ? 'normal'
+              : lane.stepVelocities[stepIndex]
+            : 'off';
+      if (velocity !== 'off') {
+        const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+        playLaneSound(lane.instrument, velocity, volume);
       }
     }
   }
@@ -153,7 +298,7 @@ export function hasActiveMidiPlayback(): boolean {
 }
 
 export function getHandles(element: MidiElement): HandleDescriptor[] {
-  const bounds = getMidiBounds(element);
+  const bounds = getMidiBounds(normalizeMidiElement(element));
   const centerY = (bounds.top + bounds.bottom) / 2;
 
   return [
@@ -176,41 +321,52 @@ export function render(
   element: MidiElement,
   _options?: RenderOptions
 ): void {
-  seenThisFrame.add(element.id);
+  const normalized = normalizeMidiElement(element);
+  seenThisFrame.add(normalized.id);
 
-  const layout = getMidiLayout(element);
-  const currentStep = syncPlayback(element, currentFrameTime);
-  const seed = seedFromId(element.id);
+  const layout = getMidiLayout(normalized);
+  const currentStep = syncPlayback(normalized, currentFrameTime);
+  const seed = seedFromId(normalized.id);
   const rc = getRoughCanvas(ctx);
 
   ctx.save();
-
-  // Subtle paper shadow
   ctx.shadowBlur = 5;
-  ctx.shadowColor = 'rgba(0,0,0,0.08)';
-  rc.rectangle(layout.bounds.left, layout.bounds.top, element.width, element.height, sketchContainer(seed));
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+  rc.rectangle(
+    layout.bounds.left,
+    layout.bounds.top,
+    normalized.width,
+    normalized.height,
+    sketchContainer(seed)
+  );
   ctx.shadowBlur = 0;
 
   ctx.fillStyle = '#475569';
-  ctx.font = '21px "Caveat", cursive';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
+  ctx.textBaseline = 'top';
+  ctx.font = '15px "Caveat", cursive';
+  ctx.fillText('Midi', layout.headerTextBounds.left, layout.headerTextBounds.top);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px "Caveat", cursive';
   ctx.fillText(
-    `${element.steps} Steps · ${element.tempo} BPM`,
-    layout.toggleModeBounds.right + 14,
-    textY
+    `${normalized.steps} steps · ${normalized.tempo} BPM · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
+    layout.headerTextBounds.left,
+    layout.headerTextBounds.top + 16
   );
 
-  const mode = element.inputMode ?? 'tap';
-  const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
+  renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
+  renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
 
-  renderPlayButton(ctx, rc, layout.playButtonBounds, element.isLooping, seed);
-  renderModeToggle(ctx, rc, layout.toggleModeBounds, mode, seed);
-  renderLane(ctx, rc, element, layout, currentStep, mode, velocities, seed);
+  for (const laneLayout of layout.lanes) {
+    renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
+  }
 
-  if (element.automationEnabled && layout.automationLaneBounds) {
-    renderAutomationLane(ctx, rc, element, layout, seed);
+  renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed);
+  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
+
+  if (normalized.automationEnabled && layout.automationLaneBounds) {
+    renderAutomationLane(ctx, rc, normalized, layout, seed);
   }
 
   ctx.restore();
@@ -228,11 +384,13 @@ function renderPlayButton(
   const h = bounds.bottom - bounds.top;
 
   rc.rectangle(
-    bounds.left, bounds.top, w, h,
+    bounds.left,
+    bounds.top,
+    w,
+    h,
     isLooping ? sketchButtonActive('#0f766e', seed + 1) : sketchButtonIdle(seed + 1)
   );
 
-  // Icon glyph — keep crisp at this scale
   ctx.fillStyle = isLooping ? '#ffffff' : '#2f3b52';
   if (isLooping) {
     const insetX = w * 0.28;
@@ -262,13 +420,15 @@ function renderModeToggle(
   const isTickMode = mode === 'tick';
 
   rc.rectangle(
-    bounds.left, bounds.top,
-    bounds.right - bounds.left, bounds.bottom - bounds.top,
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
     isTickMode ? sketchButtonActive('#6d28d9', seed + 2) : sketchButtonIdle(seed + 2)
   );
 
   ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
-  ctx.font = 'bold 17px "Caveat", cursive';
+  ctx.font = 'bold 15px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
@@ -279,96 +439,304 @@ function renderLane(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
-  layout: ReturnType<typeof getMidiLayout>,
+  laneLayout: ReturnType<typeof getMidiLayout>['lanes'][number],
   currentStep: number | null,
   mode: MidiInputMode,
-  velocities: StepVelocity[],
   seed: number
 ): void {
+  const lane = element.lanes[laneLayout.laneIndex];
+  const accentColor = getLaneAccentColor(lane.instrument);
+  const stepInsetX = Math.min(8, Math.max(5, laneLayout.stepWidth * 0.14));
+  const stepInsetY = Math.min(8, Math.max(5, laneLayout.stepHeight * 0.16));
+  const labelX = laneLayout.instrumentBounds.left + 26;
+  const labelMaxWidth = Math.max(24, laneLayout.removeButtonBounds.left - labelX - 12);
+
   ctx.save();
-  const stepInsetX = Math.min(8, Math.max(5, layout.stepWidth * 0.14));
-  const stepInsetY = Math.min(8, Math.max(5, layout.stepHeight * 0.16));
 
   rc.rectangle(
-    layout.laneBounds.left,
-    layout.laneBounds.top,
-    layout.laneBounds.right - layout.laneBounds.left,
-    layout.laneBounds.bottom - layout.laneBounds.top,
-    sketchLane(seed + 3)
+    laneLayout.instrumentBounds.left,
+    laneLayout.instrumentBounds.top,
+    laneLayout.instrumentBounds.right - laneLayout.instrumentBounds.left,
+    laneLayout.instrumentBounds.bottom - laneLayout.instrumentBounds.top,
+    {
+      roughness: 1.0,
+      bowing: 0.7,
+      stroke: '#c9b99e',
+      strokeWidth: 1,
+      fill: '#f4efe4',
+      fillStyle: 'solid',
+      seed: seed + laneLayout.laneIndex * 37 + 1,
+    }
   );
 
-  for (let i = 0; i < element.steps; i++) {
-    const x = layout.laneBounds.left + i * layout.stepWidth;
-    const isBarBoundary = i % 4 === 0;
+  ctx.fillStyle = accentColor;
+  ctx.beginPath();
+  ctx.roundRect(
+    laneLayout.instrumentBounds.left + 6,
+    laneLayout.instrumentBounds.top + 6,
+    6,
+    laneLayout.instrumentBounds.bottom - laneLayout.instrumentBounds.top - 12,
+    4
+  );
+  ctx.fill();
 
-    // Current-step highlight — keep crisp (live animation)
-    if (currentStep === i) {
+  ctx.fillStyle = '#2f3b52';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '16px "Caveat", cursive';
+  ctx.fillText(
+    getInstrumentLabel(lane.instrument),
+    labelX,
+    laneLayout.instrumentBounds.top + 21,
+    labelMaxWidth
+  );
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px "Caveat", cursive';
+  ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
+
+  ctx.strokeStyle = '#64748b';
+  ctx.lineWidth = 1.5;
+  const chevronX = laneLayout.removeButtonBounds.left - 16;
+  const chevronY = laneLayout.instrumentBounds.top + 38;
+  ctx.beginPath();
+  ctx.moveTo(chevronX - 4, chevronY - 3);
+  ctx.lineTo(chevronX, chevronY + 1);
+  ctx.lineTo(chevronX + 4, chevronY - 3);
+  ctx.stroke();
+
+  if (element.lanes.length > 1) {
+    renderRemoveButton(ctx, rc, laneLayout.removeButtonBounds, seed + laneLayout.laneIndex * 37 + 5);
+  }
+
+  rc.rectangle(
+    laneLayout.gridBounds.left,
+    laneLayout.gridBounds.top,
+    laneLayout.gridBounds.right - laneLayout.gridBounds.left,
+    laneLayout.gridBounds.bottom - laneLayout.gridBounds.top,
+    {
+      roughness: 0.8,
+      bowing: 0.6,
+      stroke: '#94a3b8',
+      strokeWidth: 1,
+      fill: '#fffef8',
+      fillStyle: 'solid',
+      seed: seed + laneLayout.laneIndex * 37 + 9,
+    }
+  );
+
+  for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
+    const x = laneLayout.gridBounds.left + stepIndex * laneLayout.stepWidth;
+    const isBarBoundary = stepIndex % 4 === 0;
+    const velocity = lane.stepVelocities[stepIndex];
+
+    if (currentStep === stepIndex) {
       ctx.fillStyle = 'rgba(15, 118, 110, 0.10)';
-      ctx.fillRect(x, layout.laneBounds.top, layout.stepWidth, layout.stepHeight);
+      ctx.fillRect(x, laneLayout.gridBounds.top, laneLayout.stepWidth, laneLayout.stepHeight);
     }
 
     if (mode === 'tick') {
-      const vel = velocities[i];
-      if (vel !== 'off') {
-        const ratioMap: Record<StepVelocity, number> = { off: 0, low: 0.33, normal: 0.60, high: 0.90 };
-        const colorMap: Record<StepVelocity, string> = { off: 'transparent', low: '#5eead4', normal: '#0f766e', high: '#7c3aed' };
-        const ratio = ratioMap[vel];
-        const tickHeight = layout.stepHeight * ratio;
-        const tickCenterY = (layout.laneBounds.top + layout.laneBounds.bottom) / 2;
-        const tickX = x + layout.stepWidth / 2;
-        const tickWidth = Math.max(3, layout.stepWidth * 0.25);
+      if (velocity !== 'off') {
+        const ratioMap: Record<StepVelocity, number> = {
+          off: 0,
+          low: 0.33,
+          normal: 0.6,
+          high: 0.9,
+        };
+        const colorMap: Record<StepVelocity, string> = {
+          off: 'transparent',
+          low: '#5eead4',
+          normal: accentColor,
+          high: '#7c3aed',
+        };
+        const ratio = ratioMap[velocity];
+        const tickHeight = laneLayout.stepHeight * ratio;
+        const tickCenterY = (laneLayout.gridBounds.top + laneLayout.gridBounds.bottom) / 2;
+        const tickX = x + laneLayout.stepWidth / 2;
+        const tickWidth = Math.max(3, laneLayout.stepWidth * 0.25);
         rc.line(
-          tickX, tickCenterY - tickHeight / 2,
-          tickX, tickCenterY + tickHeight / 2,
-          sketchTickLine(colorMap[vel], tickWidth, seed + i * 7 + 10)
+          tickX,
+          tickCenterY - tickHeight / 2,
+          tickX,
+          tickCenterY + tickHeight / 2,
+          sketchTickLine(colorMap[velocity], tickWidth, seed + laneLayout.laneIndex * 101 + stepIndex + 20)
         );
       }
-    } else {
-      if (element.activeSteps[i]) {
-        rc.rectangle(
-          x + stepInsetX,
-          layout.laneBounds.top + stepInsetY,
-          Math.max(4, layout.stepWidth - stepInsetX * 2),
-          Math.max(8, layout.stepHeight - stepInsetY * 2),
-          sketchStepActive(seed + i * 7 + 100)
-        );
-      }
+    } else if (lane.activeSteps[stepIndex]) {
+      const alphaMap: Record<StepVelocity, number> = {
+        off: 0.5,
+        low: 0.55,
+        normal: 0.85,
+        high: 1,
+      };
+      const inset = velocity === 'high' ? 2 : velocity === 'low' ? 7 : 4;
+      rc.rectangle(
+        x + Math.max(inset, stepInsetX * 0.5),
+        laneLayout.gridBounds.top + stepInsetY,
+        Math.max(4, laneLayout.stepWidth - Math.max(inset, stepInsetX * 0.5) * 2),
+        Math.max(8, laneLayout.stepHeight - stepInsetY * 2),
+        {
+          roughness: 1.4,
+          bowing: 1.0,
+          stroke: accentColor,
+          strokeWidth: 1,
+          fill: withAlpha(accentColor, alphaMap[velocity]),
+          fillStyle: 'hachure',
+          hachureAngle: -41,
+          hachureGap: 4,
+          seed: seed + laneLayout.laneIndex * 101 + stepIndex + 120,
+        }
+      );
     }
 
-    if (i > 0) {
+    if (stepIndex > 0) {
       rc.line(
-        x, layout.laneBounds.top + 1,
-        x, layout.laneBounds.bottom - 1,
+        x,
+        laneLayout.gridBounds.top + 1,
+        x,
+        laneLayout.gridBounds.bottom - 1,
         isBarBoundary
-          ? sketchGridMajor(seed + i * 3 + 200)
-          : sketchGridMinor(seed + i * 3 + 200)
+          ? sketchGridMajor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
+          : sketchGridMinor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
       );
     }
   }
 
-  // Playhead — keep crisp (live animation)
   if (currentStep !== null) {
-    const playheadX = layout.laneBounds.left + currentStep * layout.stepWidth + layout.stepWidth / 2;
+    const playheadX =
+      laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
     ctx.strokeStyle = '#f97316';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(playheadX, layout.laneBounds.top - 2);
-    ctx.lineTo(playheadX, layout.laneBounds.bottom + 2);
+    ctx.moveTo(playheadX, laneLayout.gridBounds.top - 2);
+    ctx.lineTo(playheadX, laneLayout.gridBounds.bottom + 2);
     ctx.stroke();
   }
 
   ctx.restore();
 }
 
+function renderAddLaneButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
+  ctx.save();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed + 400)
+  );
+
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  ctx.strokeStyle = '#0f766e';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(centerX - 6, centerY);
+  ctx.lineTo(centerX + 6, centerY);
+  ctx.moveTo(centerX, centerY - 6);
+  ctx.lineTo(centerX, centerY + 6);
+  ctx.stroke();
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px "Caveat", cursive';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Add lane', bounds.right + 8, centerY);
+  ctx.restore();
+}
+
+function renderRemoveButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
+  ctx.save();
+  rc.rectangle(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, {
+    roughness: 1.0,
+    bowing: 0.7,
+    stroke: '#c2410c',
+    strokeWidth: 1.2,
+    fill: '#fff7ed',
+    fillStyle: 'solid',
+    seed,
+  });
+
+  ctx.strokeStyle = '#c2410c';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(bounds.left + 3.5, bounds.top + 3.5);
+  ctx.lineTo(bounds.right - 3.5, bounds.bottom - 3.5);
+  ctx.moveTo(bounds.right - 3.5, bounds.top + 3.5);
+  ctx.lineTo(bounds.left + 3.5, bounds.bottom - 3.5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderOpenInstrumentMenu(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
+): void {
+  if (!element.openInstrumentLaneId) return;
+
+  const laneLayout = layout.lanes.find(
+    (lane) => element.lanes[lane.laneIndex]?.id === element.openInstrumentLaneId
+  );
+  if (!laneLayout) return;
+
+  ctx.save();
+  const bounds = laneLayout.instrumentMenuBounds;
+  rc.rectangle(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, {
+    roughness: 1.0,
+    bowing: 0.7,
+    stroke: '#2f3b52',
+    strokeWidth: 1.4,
+    fill: '#fffaf0',
+    fillStyle: 'solid',
+    seed: seed + 500 + laneLayout.laneIndex,
+  });
+
+  MIDI_LANE_INSTRUMENTS.forEach((instrument, index) => {
+    const rowTop = bounds.top + index * 22;
+    const isActive = element.lanes[laneLayout.laneIndex].instrument === instrument;
+    if (isActive) {
+      ctx.fillStyle = 'rgba(15, 118, 110, 0.10)';
+      ctx.fillRect(bounds.left + 1, rowTop + 1, bounds.right - bounds.left - 2, 20);
+    }
+
+    ctx.fillStyle = getLaneAccentColor(instrument);
+    ctx.beginPath();
+    ctx.roundRect(bounds.left + 8, rowTop + 5, 6, 12, 3);
+    ctx.fill();
+
+    ctx.fillStyle = '#2f3b52';
+    ctx.font = '14px "Caveat", cursive';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(getInstrumentLabel(instrument), bounds.left + 20, rowTop + 11);
+  });
+  ctx.restore();
+}
+
 function replayPaths(
   ctx: CanvasRenderingContext2D,
-  paths: Array<Array<{x: number; y: number}>>
+  paths: Array<Array<{ x: number; y: number }>>
 ): void {
   for (const path of paths) {
     if (path.length < 2) continue;
     ctx.beginPath();
     ctx.moveTo(path[0].x, path[0].y);
-    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(path[i].x, path[i].y);
+    }
     ctx.stroke();
   }
 }
@@ -380,31 +748,29 @@ function renderAutomationLane(
   layout: ReturnType<typeof getMidiLayout>,
   seed: number
 ): void {
-  const lane = layout.automationLaneBounds!;
+  if (!layout.automationLaneBounds) return;
 
+  const lane = layout.automationLaneBounds;
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  // U-border as three separate rough lines
-  const borderOpts = sketchAutoBorder(seed + 300);
+  const borderOpts = sketchAutoBorder(seed + 600);
   rc.line(lane.left, lane.top, lane.left, lane.bottom, borderOpts);
   rc.line(lane.left, lane.bottom, lane.right, lane.bottom, borderOpts);
   rc.line(lane.right, lane.bottom, lane.right, lane.top, borderOpts);
 
-  // Replay the user's actual curve stroke exactly as drawn
   if (element.automationCurvePaths) {
     ctx.strokeStyle = '#2f3b52';
     ctx.lineWidth = 1.5;
     replayPaths(ctx, element.automationCurvePaths);
   }
 
-  // VOL indicator
   const indicatorW = 36;
   const indicatorH = 20;
   const indicatorX = lane.left + 4;
   const indicatorY = lane.top + 4;
-  rc.rectangle(indicatorX, indicatorY, indicatorW, indicatorH, sketchVolBox(seed + 301));
+  rc.rectangle(indicatorX, indicatorY, indicatorW, indicatorH, sketchVolBox(seed + 601));
   ctx.fillStyle = '#2f3b52';
   ctx.font = 'bold 15px "Caveat", cursive';
   ctx.textAlign = 'center';
@@ -414,11 +780,20 @@ function renderAutomationLane(
   ctx.restore();
 }
 
+function getLaneAccentColor(instrument: MidiInstrument): string {
+  const index = MIDI_LANE_INSTRUMENTS.indexOf(instrument);
+  const colors = ['#0f766e', '#0b7285', '#b45309', '#7c3aed', '#1d4ed8', '#be185d', '#c2410c'];
+  return colors[Math.max(0, index) % colors.length];
+}
+
+function withAlpha(hexColor: string, alpha: number): string {
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const alphaHex = Math.round(safeAlpha * 255)
+    .toString(16)
+    .padStart(2, '0');
+  return `${hexColor}${alphaHex}`;
+}
+
 export function getBounds(element: MidiElement): BoundingBox | null {
-  const bounds = getMidiBounds(element);
-  if (!element.automationEnabled || element.automationBottomY === undefined) return bounds;
-  return {
-    ...bounds,
-    bottom: element.automationBottomY,
-  };
+  return getMidiInteractionBounds(normalizeMidiElement(element));
 }

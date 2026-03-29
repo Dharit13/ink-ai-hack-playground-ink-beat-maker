@@ -1,48 +1,75 @@
 import type { BoundingBox } from '../../types';
 import type { MidiElement } from './types';
+import {
+  MIDI_ADD_BUTTON_SIZE,
+  MIDI_BODY_TOP_OFFSET,
+  MIDI_FOOTER_GAP,
+  MIDI_HEADER_HEIGHT,
+  MIDI_LANE_GAP,
+  MIDI_LANE_HEIGHT,
+  normalizeMidiElement,
+} from './types';
+
+export interface MidiLaneLayout {
+  laneIndex: number;
+  instrumentBounds: BoundingBox;
+  removeButtonBounds: BoundingBox;
+  gridBounds: BoundingBox;
+  instrumentMenuBounds: BoundingBox;
+  stepWidth: number;
+  stepHeight: number;
+}
 
 export interface MidiLayout {
   bounds: BoundingBox;
   playButtonBounds: BoundingBox;
   toggleModeBounds: BoundingBox;
-  laneBounds: BoundingBox;
+  headerTextBounds: BoundingBox;
+  addLaneBounds: BoundingBox;
+  lanes: MidiLaneLayout[];
   headerHeight: number;
-  stepWidth: number;
-  stepHeight: number;
   automationLaneBounds?: BoundingBox;
 }
 
 const OUTER_PADDING = 10;
-const TOP_PADDING = 8;
-const HEADER_HEIGHT = 30;
-const PLAY_BUTTON_SIZE = 28;
+const HEADER_INSET_Y = 8;
+const PLAY_BUTTON_SIZE = 24;
 const CONTROL_GAP = 12;
-const BODY_GAP = 8;
-const BOTTOM_PADDING = 8;
-const TOGGLE_BUTTON_WIDTH = 60;
+const LANE_LABEL_WIDTH = 132;
+const REMOVE_BUTTON_SIZE = 14;
+const MENU_ROW_HEIGHT = 22;
+const TOGGLE_BUTTON_WIDTH = 50;
+const HEADER_TEXT_GAP = 16;
+const CONTROL_HIT_PADDING = 8;
+const AUTOMATION_GAP = 8;
+const AUTOMATION_ZONE_REACH = 220;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
-  const tx = element.transform.values[6];
-  const ty = element.transform.values[7];
+  const normalized = normalizeMidiElement(element);
+  const tx = normalized.transform.values[6];
+  const ty = normalized.transform.values[7];
 
   return {
     left: tx,
     top: ty,
-    right: tx + element.width,
-    bottom: ty + element.height,
+    right: tx + normalized.width,
+    bottom: ty + normalized.height,
   };
 }
 
 export function getMidiLayout(element: MidiElement): MidiLayout {
-  const bounds = getMidiBounds(element);
-  const headerHeight = Math.min(HEADER_HEIGHT, Math.max(28, element.height * 0.34));
+  const normalized = normalizeMidiElement(element);
+  const bounds = getMidiBounds(normalized);
+  const headerHeight = MIDI_HEADER_HEIGHT;
   const playButtonSize = Math.min(PLAY_BUTTON_SIZE, headerHeight);
+  const bodyTop = bounds.top + headerHeight + MIDI_BODY_TOP_OFFSET;
+  const lanes: MidiLaneLayout[] = [];
 
   const playButtonBounds: BoundingBox = {
     left: bounds.left + OUTER_PADDING,
-    top: bounds.top + TOP_PADDING + (headerHeight - playButtonSize) / 2,
+    top: bounds.top + HEADER_INSET_Y,
     right: bounds.left + OUTER_PADDING + playButtonSize,
-    bottom: bounds.top + TOP_PADDING + (headerHeight - playButtonSize) / 2 + playButtonSize,
+    bottom: bounds.top + HEADER_INSET_Y + playButtonSize,
   };
 
   const toggleModeBounds: BoundingBox = {
@@ -52,25 +79,71 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: playButtonBounds.bottom,
   };
 
-  const bodyTop = bounds.top + TOP_PADDING + headerHeight + BODY_GAP;
-  const laneBounds: BoundingBox = {
-    left: bounds.left + OUTER_PADDING,
-    top: bodyTop,
+  const headerTextBounds: BoundingBox = {
+    left: toggleModeBounds.right + HEADER_TEXT_GAP,
+    top: bounds.top + 6,
     right: bounds.right - OUTER_PADDING,
-    bottom: bounds.bottom - BOTTOM_PADDING,
+    bottom: bounds.top + headerHeight - 4,
+  };
+
+  for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
+    const laneTop = bodyTop + laneIndex * (MIDI_LANE_HEIGHT + MIDI_LANE_GAP);
+    const instrumentBounds: BoundingBox = {
+      left: bounds.left + OUTER_PADDING,
+      top: laneTop,
+      right: bounds.left + OUTER_PADDING + LANE_LABEL_WIDTH,
+      bottom: laneTop + MIDI_LANE_HEIGHT,
+    };
+    const removeButtonBounds: BoundingBox = {
+      left: instrumentBounds.right - REMOVE_BUTTON_SIZE - 10,
+      top: instrumentBounds.top + 10,
+      right: instrumentBounds.right - 10,
+      bottom: instrumentBounds.top + 10 + REMOVE_BUTTON_SIZE,
+    };
+    const gridBounds: BoundingBox = {
+      left: instrumentBounds.right + CONTROL_GAP,
+      top: laneTop,
+      right: bounds.right - OUTER_PADDING,
+      bottom: laneTop + MIDI_LANE_HEIGHT,
+    };
+    const menuTop = instrumentBounds.bottom + 4;
+    const instrumentMenuBounds: BoundingBox = {
+      left: instrumentBounds.left,
+      top: menuTop,
+      right: instrumentBounds.right + 34,
+      bottom: menuTop + MENU_ROW_HEIGHT * 7,
+    };
+
+    lanes.push({
+      laneIndex,
+      instrumentBounds,
+      removeButtonBounds,
+      gridBounds,
+      instrumentMenuBounds,
+      stepWidth: (gridBounds.right - gridBounds.left) / normalized.steps,
+      stepHeight: gridBounds.bottom - gridBounds.top,
+    });
+  }
+
+  const lastLaneBottom = lanes.length > 0 ? lanes[lanes.length - 1].gridBounds.bottom : bodyTop;
+  const addLaneBounds: BoundingBox = {
+    left: bounds.left + OUTER_PADDING,
+    top: lastLaneBottom + MIDI_FOOTER_GAP,
+    right: bounds.left + OUTER_PADDING + MIDI_ADD_BUTTON_SIZE,
+    bottom: lastLaneBottom + MIDI_FOOTER_GAP + MIDI_ADD_BUTTON_SIZE,
   };
 
   const automationLaneBounds: BoundingBox | undefined =
-    element.automationEnabled &&
-    element.automationTopY !== undefined &&
-    element.automationBottomY !== undefined &&
-    element.automationLeftX !== undefined &&
-    element.automationRightX !== undefined
+    normalized.automationEnabled &&
+    normalized.automationTopY !== undefined &&
+    normalized.automationBottomY !== undefined &&
+    normalized.automationLeftX !== undefined &&
+    normalized.automationRightX !== undefined
       ? {
-          left: element.automationLeftX,
-          top: element.automationTopY,
-          right: element.automationRightX,
-          bottom: element.automationBottomY,
+          left: normalized.automationLeftX,
+          top: normalized.automationTopY,
+          right: normalized.automationRightX,
+          bottom: normalized.automationBottomY,
         }
       : undefined;
 
@@ -78,32 +151,95 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bounds,
     playButtonBounds,
     toggleModeBounds,
-    laneBounds,
+    headerTextBounds,
+    addLaneBounds,
+    lanes,
     headerHeight,
-    stepWidth: (laneBounds.right - laneBounds.left) / element.steps,
-    stepHeight: laneBounds.bottom - laneBounds.top,
     automationLaneBounds,
   };
 }
 
-const AUTOMATION_ZONE_REACH = 200;
-
 export function getAutomationZoneBounds(element: MidiElement): BoundingBox {
-  const bounds = getMidiBounds(element);
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+  const lastLane = layout.lanes[layout.lanes.length - 1];
+  const left = lastLane ? lastLane.gridBounds.left : layout.bounds.left + OUTER_PADDING;
+  const right = lastLane ? lastLane.gridBounds.right : layout.bounds.right - OUTER_PADDING;
+  const top = layout.addLaneBounds.bottom + AUTOMATION_GAP;
+
   return {
-    left: bounds.left,
-    top: bounds.bottom,
-    right: bounds.right,
-    bottom: bounds.bottom + AUTOMATION_ZONE_REACH,
+    left,
+    top,
+    right,
+    bottom: top + AUTOMATION_ZONE_REACH,
   };
 }
 
-export function getMidiStepBounds(element: MidiElement, stepIndex: number): BoundingBox {
+export function getMidiStepBounds(
+  element: MidiElement,
+  laneIndex: number,
+  stepIndex: number
+): BoundingBox {
   const layout = getMidiLayout(element);
+  const lane = layout.lanes[laneIndex];
+
   return {
-    left: layout.laneBounds.left + stepIndex * layout.stepWidth,
-    top: layout.laneBounds.top,
-    right: layout.laneBounds.left + (stepIndex + 1) * layout.stepWidth,
-    bottom: layout.laneBounds.bottom,
+    left: lane.gridBounds.left + stepIndex * lane.stepWidth,
+    top: lane.gridBounds.top,
+    right: lane.gridBounds.left + (stepIndex + 1) * lane.stepWidth,
+    bottom: lane.gridBounds.bottom,
   };
+}
+
+export function expandBounds(bounds: BoundingBox, padding: number): BoundingBox {
+  return {
+    left: bounds.left - padding,
+    top: bounds.top - padding,
+    right: bounds.right + padding,
+    bottom: bounds.bottom + padding,
+  };
+}
+
+export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+
+  let left = layout.bounds.left;
+  let top = layout.bounds.top;
+  let right = layout.bounds.right;
+  let bottom = layout.bounds.bottom;
+
+  const controlBounds = [
+    expandBounds(layout.playButtonBounds, CONTROL_HIT_PADDING),
+    expandBounds(layout.toggleModeBounds, CONTROL_HIT_PADDING),
+    expandBounds(layout.addLaneBounds, CONTROL_HIT_PADDING),
+    ...layout.lanes.flatMap((lane) => [
+      expandBounds(lane.instrumentBounds, CONTROL_HIT_PADDING),
+      expandBounds(lane.removeButtonBounds, CONTROL_HIT_PADDING),
+    ]),
+  ];
+
+  if (normalized.openInstrumentLaneId) {
+    const openLane = layout.lanes.find(
+      (lane) => normalized.lanes[lane.laneIndex]?.id === normalized.openInstrumentLaneId
+    );
+    if (openLane) {
+      controlBounds.push(expandBounds(openLane.instrumentMenuBounds, CONTROL_HIT_PADDING));
+    }
+  }
+
+  if (layout.automationLaneBounds) {
+    controlBounds.push(expandBounds(layout.automationLaneBounds, CONTROL_HIT_PADDING));
+  } else {
+    controlBounds.push(expandBounds(getAutomationZoneBounds(normalized), CONTROL_HIT_PADDING));
+  }
+
+  for (const bounds of controlBounds) {
+    left = Math.min(left, bounds.left);
+    top = Math.min(top, bounds.top);
+    right = Math.max(right, bounds.right);
+    bottom = Math.max(bottom, bounds.bottom);
+  }
+
+  return { left, top, right, bottom };
 }
