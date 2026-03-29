@@ -3,6 +3,13 @@ import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlug
 import type { MidiElement } from './types';
 import { getMidiBounds, getMidiLayout, getMidiStepBounds } from './layout';
 import { primeMidiAudio } from './renderer';
+import {
+  createMidiLane,
+  getMidiHeightForLaneCount,
+  MIDI_LANE_INSTRUMENTS,
+  MIDI_MIN_HEIGHT,
+  normalizeMidiElement,
+} from './types';
 
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
@@ -123,21 +130,28 @@ function getCoverageRatio(strokes: Stroke[], bounds: BoundingBox): number {
   return filledPixels / (width * height);
 }
 
-function getTargetStepIndices(element: MidiElement, strokes: Stroke[]): number[] {
-  const indices = new Set<number>();
+function getTargetCells(
+  element: MidiElement,
+  strokes: Stroke[]
+): Array<{ laneIndex: number; stepIndex: number }> {
+  const normalized = normalizeMidiElement(element);
+  const targets: Array<{ laneIndex: number; stepIndex: number }> = [];
 
-  for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
-    const stepBounds = getMidiStepBounds(element, stepIndex);
-    for (const stroke of strokes) {
-      const strokeBounds = getStrokeBounds(stroke);
-      if (strokeBounds && boundingBoxesOverlap(stepBounds, strokeBounds)) {
-        indices.add(stepIndex);
-        break;
+  for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
+    for (let stepIndex = 0; stepIndex < normalized.steps; stepIndex++) {
+      const stepBounds = getMidiStepBounds(normalized, laneIndex, stepIndex);
+      if (
+        strokes.some((stroke) => {
+          const strokeBounds = getStrokeBounds(stroke);
+          return strokeBounds ? boundingBoxesOverlap(stepBounds, strokeBounds) : false;
+        })
+      ) {
+        targets.push({ laneIndex, stepIndex });
       }
     }
   }
 
-  return Array.from(indices).sort((a, b) => a - b);
+  return targets;
 }
 
 function togglePlayState(element: MidiElement): MidiElement {
@@ -147,41 +161,179 @@ function togglePlayState(element: MidiElement): MidiElement {
   };
 }
 
+function cycleLaneInstrument(element: MidiElement, laneIndex: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  const lanes = normalized.lanes.map((lane, index) => {
+    if (index !== laneIndex) return lane;
+    const currentIndex = MIDI_LANE_INSTRUMENTS.indexOf(lane.instrument);
+    return {
+      ...lane,
+      instrument: MIDI_LANE_INSTRUMENTS[(currentIndex + 1) % MIDI_LANE_INSTRUMENTS.length],
+    };
+  });
+
+  return {
+    ...normalized,
+    lanes,
+  };
+}
+
+function toggleInstrumentMenu(element: MidiElement, laneIndex: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  const laneId = normalized.lanes[laneIndex]?.id ?? null;
+  return {
+    ...normalized,
+    openInstrumentLaneId:
+      normalized.openInstrumentLaneId === laneId ? null : laneId,
+  };
+}
+
+function addLane(element: MidiElement): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
+  const lanes = [...normalized.lanes, createMidiLane(normalized.steps, nextInstrument)];
+
+  return {
+    ...normalized,
+    lanes,
+    height: Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length)),
+    openInstrumentLaneId: null,
+  };
+}
+
+function removeLane(element: MidiElement, laneIndex: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  if (normalized.lanes.length <= 1) return normalized;
+
+  const lanes = normalized.lanes.filter((_, index) => index !== laneIndex);
+  return {
+    ...normalized,
+    lanes,
+    height: Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length)),
+    openInstrumentLaneId: null,
+  };
+}
+
+function selectInstrumentFromMenu(
+  element: MidiElement,
+  laneIndex: number,
+  center: Offset
+): MidiElement | null {
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+  const laneLayout = layout.lanes[laneIndex];
+  if (!laneLayout || !pointInBounds(center, laneLayout.instrumentMenuBounds)) return null;
+
+  const rowIndex = Math.floor((center.y - laneLayout.instrumentMenuBounds.top) / 22);
+  const instrument = MIDI_LANE_INSTRUMENTS[rowIndex];
+  if (!instrument) return null;
+
+  const lanes = normalized.lanes.map((lane, index) =>
+    index === laneIndex ? { ...lane, instrument } : lane
+  );
+
+  return {
+    ...normalized,
+    lanes,
+    openInstrumentLaneId: null,
+  };
+}
+
 export function isInterestedIn(
   element: MidiElement,
   _strokes: Stroke[],
   strokeBounds: BoundingBox
 ): boolean {
-  return boundingBoxesOverlap(getMidiBounds(element), strokeBounds);
+  return boundingBoxesOverlap(getMidiBounds(normalizeMidiElement(element)), strokeBounds);
 }
 
 export async function acceptInk(
   element: MidiElement,
   strokes: Stroke[]
 ): Promise<InteractionResult> {
-  const layout = getMidiLayout(element);
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
 
   if (strokes.length === 1) {
     const center = getStrokeCenter(strokes[0]);
     if (center && pointInBounds(center, layout.playButtonBounds)) {
       await primeMidiAudio();
       return {
-        element: togglePlayState(element),
+        element: togglePlayState(normalized),
         consumed: true,
         strokesConsumed: strokes,
       };
     }
+
+    if (center && pointInBounds(center, layout.addLaneBounds)) {
+      return {
+        element: addLane(normalized),
+        consumed: true,
+        strokesConsumed: strokes,
+      };
+    }
+
+    for (const laneLayout of layout.lanes) {
+      if (center && pointInBounds(center, laneLayout.removeButtonBounds)) {
+        return {
+          element: removeLane(normalized, laneLayout.laneIndex),
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
+    }
+
+    if (center && normalized.openInstrumentLaneId) {
+      const openLaneIndex = normalized.lanes.findIndex(
+        (lane) => lane.id === normalized.openInstrumentLaneId
+      );
+      if (openLaneIndex >= 0) {
+        const selected = selectInstrumentFromMenu(normalized, openLaneIndex, center);
+        if (selected) {
+          return {
+            element: selected,
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        }
+
+        const openLayout = layout.lanes[openLaneIndex];
+        if (!pointInBounds(center, openLayout.instrumentBounds)) {
+          return {
+            element: {
+              ...normalized,
+              openInstrumentLaneId: null,
+            },
+            consumed: false,
+            strokesConsumed: [],
+          };
+        }
+      }
+    }
+
+    for (const laneLayout of layout.lanes) {
+      if (center && pointInBounds(center, laneLayout.instrumentBounds)) {
+        return {
+          element: toggleInstrumentMenu(normalized, laneLayout.laneIndex),
+          consumed: true,
+          strokesConsumed: strokes,
+        };
+      }
+    }
   }
 
-  const targetStepIndices = getTargetStepIndices(element, strokes);
-  if (targetStepIndices.length === 0) {
+  const targets = getTargetCells(normalized, strokes);
+  if (targets.length === 0) {
     return { element, consumed: false, strokesConsumed: [] };
   }
 
-  const updatedSteps = [...element.activeSteps];
+  const lanes = normalized.lanes.map((lane) => ({
+    ...lane,
+    activeSteps: [...lane.activeSteps],
+  }));
 
-  for (const stepIndex of targetStepIndices) {
-    const stepBounds = getMidiStepBounds(element, stepIndex);
+  for (const target of targets) {
+    const stepBounds = getMidiStepBounds(normalized, target.laneIndex, target.stepIndex);
     const overlappingStrokes = strokes.filter((stroke) => {
       const strokeBounds = getStrokeBounds(stroke);
       return strokeBounds ? boundingBoxesOverlap(stepBounds, strokeBounds) : false;
@@ -194,18 +346,20 @@ export async function acceptInk(
     });
 
     if (hasTap) {
-      updatedSteps[stepIndex] = !updatedSteps[stepIndex];
+      lanes[target.laneIndex].activeSteps[target.stepIndex] =
+        !lanes[target.laneIndex].activeSteps[target.stepIndex];
       continue;
     }
 
     const coverageRatio = getCoverageRatio(overlappingStrokes, stepBounds);
-    updatedSteps[stepIndex] = coverageRatio >= 0.5;
+    lanes[target.laneIndex].activeSteps[target.stepIndex] = coverageRatio >= 0.5;
   }
 
   return {
     element: {
-      ...element,
-      activeSteps: updatedSteps,
+      ...normalized,
+      lanes,
+      openInstrumentLaneId: null,
     },
     consumed: true,
     strokesConsumed: strokes,
@@ -213,7 +367,7 @@ export async function acceptInk(
 }
 
 export function getHandles(element: MidiElement) {
-  const bounds = getMidiBounds(element);
+  const bounds = getMidiBounds(normalizeMidiElement(element));
   return [
     {
       id: 'resizeRight',
@@ -235,13 +389,14 @@ export function onHandleDrag(
   phase: HandleDragPhase,
   point: Offset
 ): MidiElement {
+  const normalized = normalizeMidiElement(element);
   if (phase === 'start' || handleId !== 'resizeRight') {
-    return element;
+    return normalized;
   }
 
-  const left = element.transform.values[6];
+  const left = normalized.transform.values[6];
   return {
-    ...element,
+    ...normalized,
     width: Math.max(MIN_MIDI_WIDTH, point.x - left),
   };
 }
