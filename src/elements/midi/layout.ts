@@ -4,6 +4,7 @@ import type { MidiElement } from './types';
 export interface MidiLayout {
   bounds: BoundingBox;
   playButtonBounds: BoundingBox;
+  toggleModeBounds: BoundingBox;
   laneBounds: BoundingBox;
   headerHeight: number;
   stepWidth: number;
@@ -15,6 +16,7 @@ const HEADER_HEIGHT = 24;
 const PLAY_BUTTON_SIZE = 22;
 const CONTROL_GAP = 10;
 const BOTTOM_PADDING = 10;
+const TOGGLE_BUTTON_WIDTH = 38;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
   const tx = element.transform.values[6];
@@ -40,9 +42,16 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: bounds.top + (headerHeight - playButtonSize) / 2 + 5 + playButtonSize,
   };
 
+  const toggleModeBounds: BoundingBox = {
+    left: playButtonBounds.right + CONTROL_GAP,
+    top: playButtonBounds.top,
+    right: playButtonBounds.right + CONTROL_GAP + TOGGLE_BUTTON_WIDTH,
+    bottom: playButtonBounds.bottom,
+  };
+
   const bodyTop = bounds.top + headerHeight + 8;
   const laneBounds: BoundingBox = {
-    left: playButtonBounds.right + CONTROL_GAP,
+    left: bounds.left + OUTER_PADDING,
     top: bodyTop,
     right: bounds.right - OUTER_PADDING,
     bottom: bounds.bottom - BOTTOM_PADDING,
@@ -51,6 +60,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   return {
     bounds,
     playButtonBounds,
+    toggleModeBounds,
     laneBounds,
     headerHeight,
     stepWidth: (laneBounds.right - laneBounds.left) / element.steps,

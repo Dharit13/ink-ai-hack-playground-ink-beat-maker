@@ -2,6 +2,8 @@ import type { BoundingBox, TransformableElement } from '../../types/primitives';
 import { generateId } from '../../types/primitives';
 
 export type MidiInstrument = 'snare';
+export type MidiInputMode = 'tap' | 'tick';
+export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
 
 export interface MidiElement extends TransformableElement {
   type: 'midi';
@@ -9,6 +11,8 @@ export interface MidiElement extends TransformableElement {
   height: number;
   steps: number;
   activeSteps: boolean[];
+  stepVelocities: StepVelocity[];
+  inputMode: MidiInputMode;
   tempo: number;
   instrument: MidiInstrument;
   isLooping: boolean;
@@ -34,6 +38,8 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     height,
     steps: DEFAULT_MIDI_STEPS,
     activeSteps: Array.from({ length: DEFAULT_MIDI_STEPS }, () => false),
+    stepVelocities: Array.from({ length: DEFAULT_MIDI_STEPS }, () => 'off' as StepVelocity),
+    inputMode: 'tap' as MidiInputMode,
     tempo: DEFAULT_MIDI_TEMPO,
     instrument: DEFAULT_MIDI_INSTRUMENT,
     isLooping: false,

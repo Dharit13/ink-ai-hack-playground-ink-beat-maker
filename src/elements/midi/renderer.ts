@@ -1,6 +1,6 @@
 import type { BoundingBox } from '../../types';
 import type { HandleDescriptor, RenderOptions } from '../registry/ElementPlugin';
-import type { MidiElement } from './types';
+import type { MidiElement, MidiInputMode, StepVelocity } from './types';
 import { getMidiBounds, getMidiLayout } from './layout';
 
 interface PlaybackRuntimeState {
@@ -31,9 +31,19 @@ export async function primeMidiAudio(): Promise<void> {
   }
 }
 
-function playStepSound(element: MidiElement): void {
+const VELOCITY_GAIN: Record<StepVelocity, number> = {
+  off: 0,
+  low: 0.08,
+  normal: 0.2,
+  high: 0.4,
+};
+
+function playStepSound(element: MidiElement, velocity: StepVelocity = 'normal'): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
+
+  const peakGain = VELOCITY_GAIN[velocity];
+  if (peakGain === 0) return;
 
   const now = context.currentTime;
   const oscillator = context.createOscillator();
@@ -49,7 +59,7 @@ function playStepSound(element: MidiElement): void {
   filter.Q.setValueAtTime(0.8, now);
 
   gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(0.2, now + 0.005);
+  gainNode.gain.exponentialRampToValueAtTime(peakGain, now + 0.005);
   gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
 
   oscillator.connect(filter);
@@ -87,8 +97,18 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   const stepIndex = getCurrentStepIndex(element, now);
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
-    if (element.activeSteps[stepIndex]) {
-      playStepSound(element);
+    const mode = element.inputMode ?? 'tap';
+    const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
+    if (mode === 'tick') {
+      const vel = velocities[stepIndex];
+      if (vel !== 'off') {
+        playStepSound(element, vel);
+      }
+    } else {
+      if (element.activeSteps[stepIndex]) {
+        const vel = velocities[stepIndex] !== 'off' ? velocities[stepIndex] : 'normal';
+        playStepSound(element, vel);
+      }
     }
   }
 
@@ -151,18 +171,19 @@ export function render(
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#2f3b52';
-  ctx.font = '12px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Midi', layout.bounds.left + 12, layout.bounds.top + 16);
-
   ctx.fillStyle = '#667085';
   ctx.font = '10px sans-serif';
-  ctx.fillText(`${element.steps} steps · ${element.tempo} BPM · ${element.instrument}`, layout.bounds.left + 52, layout.bounds.top + 16);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
+  ctx.fillText(`${element.steps} steps · ${element.tempo} BPM · ${element.instrument}`, layout.toggleModeBounds.right + 8, textY);
+
+  const mode = element.inputMode ?? 'tap';
+  const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
 
   renderPlayButton(ctx, layout.playButtonBounds, element.isLooping);
-  renderLane(ctx, element, layout, currentStep);
+  renderModeToggle(ctx, layout.toggleModeBounds, mode);
+  renderLane(ctx, element, layout, currentStep, mode, velocities);
 
   ctx.restore();
 }
@@ -195,11 +216,36 @@ function renderPlayButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox, is
   ctx.restore();
 }
 
+function renderModeToggle(
+  ctx: CanvasRenderingContext2D,
+  bounds: BoundingBox,
+  mode: MidiInputMode
+): void {
+  ctx.save();
+  const isTickMode = mode === 'tick';
+  ctx.fillStyle = isTickMode ? '#6d28d9' : '#ffffff';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
+  ctx.font = 'bold 8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(isTickMode ? 'TIC' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  ctx.restore();
+}
+
 function renderLane(
   ctx: CanvasRenderingContext2D,
   element: MidiElement,
   layout: ReturnType<typeof getMidiLayout>,
-  currentStep: number | null
+  currentStep: number | null,
+  mode: MidiInputMode,
+  velocities: StepVelocity[]
 ): void {
   ctx.save();
 
@@ -226,11 +272,30 @@ function renderLane(
       ctx.fillRect(x, layout.laneBounds.top, layout.stepWidth, layout.stepHeight);
     }
 
-    if (element.activeSteps[i]) {
-      ctx.fillStyle = '#0f766e';
-      ctx.beginPath();
-      ctx.roundRect(x + 4, layout.laneBounds.top + 4, Math.max(4, layout.stepWidth - 8), Math.max(8, layout.stepHeight - 8), 6);
-      ctx.fill();
+    if (mode === 'tick') {
+      const vel = velocities[i];
+      if (vel !== 'off') {
+        const ratioMap: Record<StepVelocity, number> = { off: 0, low: 0.33, normal: 0.60, high: 0.90 };
+        const colorMap: Record<StepVelocity, string> = { off: 'transparent', low: '#5eead4', normal: '#0f766e', high: '#7c3aed' };
+        const ratio = ratioMap[vel];
+        const tickHeight = layout.stepHeight * ratio;
+        const tickCenterY = (layout.laneBounds.top + layout.laneBounds.bottom) / 2;
+        const tickX = x + layout.stepWidth / 2;
+        ctx.strokeStyle = colorMap[vel];
+        ctx.lineWidth = Math.max(3, layout.stepWidth * 0.25);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tickX, tickCenterY - tickHeight / 2);
+        ctx.lineTo(tickX, tickCenterY + tickHeight / 2);
+        ctx.stroke();
+      }
+    } else {
+      if (element.activeSteps[i]) {
+        ctx.fillStyle = '#0f766e';
+        ctx.beginPath();
+        ctx.roundRect(x + 4, layout.laneBounds.top + 4, Math.max(4, layout.stepWidth - 8), Math.max(8, layout.stepHeight - 8), 6);
+        ctx.fill();
+      }
     }
 
     if (i > 0) {
