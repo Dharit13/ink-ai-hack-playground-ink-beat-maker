@@ -34,7 +34,7 @@ export interface MidiLayout {
 }
 
 const OUTER_PADDING = 10;
-const HEADER_INSET_Y = 8;
+const HEADER_INSET_Y = 14;
 const PLAY_BUTTON_SIZE = 24;
 const CONTROL_GAP = 12;
 const LANE_LABEL_WIDTH = 132;
@@ -42,7 +42,8 @@ const REMOVE_BUTTON_SIZE = 14;
 const MENU_ROW_HEIGHT = 22;
 const TOGGLE_BUTTON_WIDTH = 50;
 const TEMPO_DISPLAY_WIDTH = 58;
-const TAP_TEMPO_BUTTON_WIDTH = 42;
+const TAP_TEMPO_BUTTON_WIDTH = 74;
+const HEADER_TAP_TEMPO_GAP = 6;
 const HEADER_TEXT_GAP = 16;
 const CONTROL_HIT_PADDING = 8;
 const AUTOMATION_GAP = 8;
@@ -85,22 +86,22 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
 
   const headerTextBounds: BoundingBox = {
     left: toggleModeBounds.right + HEADER_TEXT_GAP,
-    top: bounds.top + 6,
-    right: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH - CONTROL_GAP - TEMPO_DISPLAY_WIDTH - CONTROL_GAP,
-    bottom: bounds.top + headerHeight - 4,
+    top: playButtonBounds.top,
+    right: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH - HEADER_TAP_TEMPO_GAP - TEMPO_DISPLAY_WIDTH - CONTROL_GAP,
+    bottom: playButtonBounds.bottom,
   };
 
   const tapTempoButtonBounds: BoundingBox = {
-    left: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH,
+    left: bounds.right - OUTER_PADDING - TEMPO_DISPLAY_WIDTH - HEADER_TAP_TEMPO_GAP - TAP_TEMPO_BUTTON_WIDTH,
     top: playButtonBounds.top,
-    right: bounds.right - OUTER_PADDING,
+    right: bounds.right - OUTER_PADDING - TEMPO_DISPLAY_WIDTH - HEADER_TAP_TEMPO_GAP,
     bottom: playButtonBounds.bottom,
   };
 
   const tempoDisplayBounds: BoundingBox = {
-    left: tapTempoButtonBounds.left - CONTROL_GAP - TEMPO_DISPLAY_WIDTH,
+    left: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP,
     top: playButtonBounds.top,
-    right: tapTempoButtonBounds.left - CONTROL_GAP,
+    right: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP + TEMPO_DISPLAY_WIDTH,
     bottom: playButtonBounds.bottom,
   };
 

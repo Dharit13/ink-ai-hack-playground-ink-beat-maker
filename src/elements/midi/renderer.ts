@@ -341,18 +341,14 @@ export function render(
   );
   ctx.shadowBlur = 0;
 
-  ctx.fillStyle = '#475569';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.font = '15px "Caveat", cursive';
-  ctx.fillText('Midi', layout.headerTextBounds.left, layout.headerTextBounds.top);
-
   ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Caveat", cursive';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '16px "Caveat", cursive';
   ctx.fillText(
     `${normalized.steps} steps · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
     layout.headerTextBounds.left,
-    layout.headerTextBounds.top + 16
+    (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
   );
 
   renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
@@ -463,14 +459,14 @@ function renderTapTempoButton(
     bounds.top,
     bounds.right - bounds.left,
     bounds.bottom - bounds.top,
-    sketchButtonIdle(seed + 3)
+    sketchButtonActive(getLaneAccentColor('kick'), seed + 3)
   );
 
-  ctx.fillStyle = '#2f3b52';
+  ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 14px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Tap', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  ctx.fillText('TAP TEMPO', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
   ctx.restore();
 }
 
