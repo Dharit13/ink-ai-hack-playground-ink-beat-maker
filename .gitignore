@@ -27,3 +27,4 @@ presentation/make_tokenization_viz.py
 *.njsproj
 *.sln
 *.sw?
+.vercel
