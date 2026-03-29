@@ -1,5 +1,18 @@
-﻿import type { BoundingBox } from '../../types';
+import type { BoundingBox } from '../../types';
 import type { HandleDescriptor, RenderOptions } from '../registry/ElementPlugin';
+import { getMidiBounds, getMidiInteractionBounds, getMidiLayout } from './layout';
+import {
+  getRoughCanvas,
+  seedFromId,
+  sketchAutoBorder,
+  sketchButtonActive,
+  sketchButtonIdle,
+  sketchContainer,
+  sketchGridMajor,
+  sketchGridMinor,
+  sketchTickLine,
+  sketchVolBox,
+} from './sketchUtils';
 import {
   getInstrumentLabel,
   MIDI_LANE_INSTRUMENTS,
@@ -9,7 +22,6 @@ import {
   type MidiInstrument,
   type StepVelocity,
 } from './types';
-import { getMidiBounds, getMidiInteractionBounds, getMidiLayout } from './layout';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -176,11 +188,7 @@ function playNoiseInstrument(
   }
 }
 
-function playLaneSound(
-  instrument: MidiInstrument,
-  velocity: StepVelocity,
-  volume = 1,
-): void {
+function playLaneSound(instrument: MidiInstrument, velocity: StepVelocity, volume = 1): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
 
@@ -188,7 +196,12 @@ function playLaneSound(
   if (velocityGain <= 0) return;
   const effectiveGain = velocityGain * volume;
 
-  if (instrument === 'snare' || instrument === 'closedHat' || instrument === 'openHat' || instrument === 'crash') {
+  if (
+    instrument === 'snare' ||
+    instrument === 'closedHat' ||
+    instrument === 'openHat' ||
+    instrument === 'crash'
+  ) {
     playNoiseInstrument(context, instrument, effectiveGain);
     return;
   }
@@ -249,13 +262,14 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
     for (const lane of normalized.lanes) {
-      const velocity = normalized.inputMode === 'tick'
-        ? lane.stepVelocities[stepIndex]
-        : lane.activeSteps[stepIndex]
-          ? lane.stepVelocities[stepIndex] === 'off'
-            ? 'normal'
-            : lane.stepVelocities[stepIndex]
-          : 'off';
+      const velocity =
+        normalized.inputMode === 'tick'
+          ? lane.stepVelocities[stepIndex]
+          : lane.activeSteps[stepIndex]
+            ? lane.stepVelocities[stepIndex] === 'off'
+              ? 'normal'
+              : lane.stepVelocities[stepIndex]
+            : 'off';
       if (velocity !== 'off') {
         const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
         playLaneSound(lane.instrument, velocity, volume);
@@ -312,44 +326,47 @@ export function render(
 
   const layout = getMidiLayout(normalized);
   const currentStep = syncPlayback(normalized, currentFrameTime);
+  const seed = seedFromId(normalized.id);
+  const rc = getRoughCanvas(ctx);
 
   ctx.save();
+  ctx.shadowBlur = 5;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
+  rc.rectangle(
+    layout.bounds.left,
+    layout.bounds.top,
+    normalized.width,
+    normalized.height,
+    sketchContainer(seed)
+  );
+  ctx.shadowBlur = 0;
 
-  ctx.fillStyle = '#fffaf0';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(layout.bounds.left, layout.bounds.top, normalized.width, normalized.height, 12);
-  ctx.fill();
-  ctx.stroke();
-
-  const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
-  ctx.fillStyle = '#2f3b52';
-  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#475569';
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Midi', layout.bounds.left + 12, layout.bounds.top + 16);
+  ctx.textBaseline = 'top';
+  ctx.font = '15px "Caveat", cursive';
+  ctx.fillText('Midi', layout.headerTextBounds.left, layout.headerTextBounds.top);
 
-  ctx.fillStyle = '#667085';
-  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px "Caveat", cursive';
   ctx.fillText(
     `${normalized.steps} steps · ${normalized.tempo} BPM · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
-    layout.toggleModeBounds.right + 8,
-    textY
+    layout.headerTextBounds.left,
+    layout.headerTextBounds.top + 16
   );
 
-  renderPlayButton(ctx, layout.playButtonBounds, normalized.isLooping);
-  renderModeToggle(ctx, layout.toggleModeBounds, normalized.inputMode);
+  renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
+  renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
 
   for (const laneLayout of layout.lanes) {
-    renderLane(ctx, normalized, laneLayout, currentStep, normalized.inputMode);
+    renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
   }
 
-  renderAddLaneButton(ctx, layout.addLaneBounds);
-  renderOpenInstrumentMenu(ctx, normalized, layout);
+  renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed);
+  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
 
   if (normalized.automationEnabled && layout.automationLaneBounds) {
-    renderAutomationLane(ctx, normalized, layout);
+    renderAutomationLane(ctx, rc, normalized, layout, seed);
   }
 
   ctx.restore();
@@ -357,30 +374,35 @@ export function render(
 
 function renderPlayButton(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  isLooping: boolean
+  isLooping: boolean,
+  seed: number
 ): void {
   ctx.save();
-  ctx.fillStyle = isLooping ? '#0f766e' : '#ffffff';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
-  ctx.fill();
-  ctx.stroke();
+  const w = bounds.right - bounds.left;
+  const h = bounds.bottom - bounds.top;
+
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    w,
+    h,
+    isLooping ? sketchButtonActive('#0f766e', seed + 1) : sketchButtonIdle(seed + 1)
+  );
 
   ctx.fillStyle = isLooping ? '#ffffff' : '#2f3b52';
   if (isLooping) {
-    const insetX = (bounds.right - bounds.left) * 0.28;
-    const insetY = (bounds.bottom - bounds.top) * 0.24;
-    const barWidth = (bounds.right - bounds.left) * 0.14;
-    ctx.fillRect(bounds.left + insetX, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
-    ctx.fillRect(bounds.right - insetX - barWidth, bounds.top + insetY, barWidth, bounds.bottom - bounds.top - insetY * 2);
+    const insetX = w * 0.28;
+    const insetY = h * 0.24;
+    const barWidth = w * 0.14;
+    ctx.fillRect(bounds.left + insetX, bounds.top + insetY, barWidth, h - insetY * 2);
+    ctx.fillRect(bounds.right - insetX - barWidth, bounds.top + insetY, barWidth, h - insetY * 2);
   } else {
     ctx.beginPath();
-    ctx.moveTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.top + (bounds.bottom - bounds.top) * 0.22);
-    ctx.lineTo(bounds.right - (bounds.right - bounds.left) * 0.28, (bounds.top + bounds.bottom) / 2);
-    ctx.lineTo(bounds.left + (bounds.right - bounds.left) * 0.34, bounds.bottom - (bounds.bottom - bounds.top) * 0.22);
+    ctx.moveTo(bounds.left + w * 0.34, bounds.top + h * 0.22);
+    ctx.lineTo(bounds.right - w * 0.28, (bounds.top + bounds.bottom) / 2);
+    ctx.lineTo(bounds.left + w * 0.34, bounds.bottom - h * 0.22);
     ctx.closePath();
     ctx.fill();
   }
@@ -389,21 +411,24 @@ function renderPlayButton(
 
 function renderModeToggle(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  mode: MidiInputMode
+  mode: MidiInputMode,
+  seed: number
 ): void {
   ctx.save();
   const isTickMode = mode === 'tick';
-  ctx.fillStyle = isTickMode ? '#6d28d9' : '#ffffff';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 6);
-  ctx.fill();
-  ctx.stroke();
+
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    isTickMode ? sketchButtonActive('#6d28d9', seed + 2) : sketchButtonIdle(seed + 2)
+  );
 
   ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
-  ctx.font = 'bold 8px sans-serif';
+  ctx.font = 'bold 15px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
@@ -412,29 +437,37 @@ function renderModeToggle(
 
 function renderLane(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   laneLayout: ReturnType<typeof getMidiLayout>['lanes'][number],
   currentStep: number | null,
-  mode: MidiInputMode
+  mode: MidiInputMode,
+  seed: number
 ): void {
   const lane = element.lanes[laneLayout.laneIndex];
   const accentColor = getLaneAccentColor(lane.instrument);
+  const stepInsetX = Math.min(8, Math.max(5, laneLayout.stepWidth * 0.14));
+  const stepInsetY = Math.min(8, Math.max(5, laneLayout.stepHeight * 0.16));
+  const labelX = laneLayout.instrumentBounds.left + 26;
+  const labelMaxWidth = Math.max(24, laneLayout.removeButtonBounds.left - labelX - 12);
 
   ctx.save();
 
-  ctx.fillStyle = '#f4efe4';
-  ctx.strokeStyle = '#c9b99e';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(
+  rc.rectangle(
     laneLayout.instrumentBounds.left,
     laneLayout.instrumentBounds.top,
     laneLayout.instrumentBounds.right - laneLayout.instrumentBounds.left,
     laneLayout.instrumentBounds.bottom - laneLayout.instrumentBounds.top,
-    8
+    {
+      roughness: 1.0,
+      bowing: 0.7,
+      stroke: '#c9b99e',
+      strokeWidth: 1,
+      fill: '#f4efe4',
+      fillStyle: 'solid',
+      seed: seed + laneLayout.laneIndex * 37 + 1,
+    }
   );
-  ctx.fill();
-  ctx.stroke();
 
   ctx.fillStyle = accentColor;
   ctx.beginPath();
@@ -448,18 +481,23 @@ function renderLane(
   ctx.fill();
 
   ctx.fillStyle = '#2f3b52';
-  ctx.font = '11px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(getInstrumentLabel(lane.instrument), laneLayout.instrumentBounds.left + 18, laneLayout.instrumentBounds.top + 22);
+  ctx.font = '16px "Caveat", cursive';
+  ctx.fillText(
+    getInstrumentLabel(lane.instrument),
+    labelX,
+    laneLayout.instrumentBounds.top + 21,
+    labelMaxWidth
+  );
 
-  ctx.fillStyle = '#667085';
-  ctx.font = '9px sans-serif';
-  ctx.fillText('Instrument', laneLayout.instrumentBounds.left + 18, laneLayout.instrumentBounds.top + 36);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px "Caveat", cursive';
+  ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
 
-  ctx.strokeStyle = '#667085';
+  ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1.5;
-  const chevronX = laneLayout.instrumentBounds.right - 24;
+  const chevronX = laneLayout.removeButtonBounds.left - 16;
   const chevronY = laneLayout.instrumentBounds.top + 38;
   ctx.beginPath();
   ctx.moveTo(chevronX - 4, chevronY - 3);
@@ -468,22 +506,24 @@ function renderLane(
   ctx.stroke();
 
   if (element.lanes.length > 1) {
-    renderRemoveButton(ctx, laneLayout.removeButtonBounds);
+    renderRemoveButton(ctx, rc, laneLayout.removeButtonBounds, seed + laneLayout.laneIndex * 37 + 5);
   }
 
-  ctx.fillStyle = '#fffef8';
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(
+  rc.rectangle(
     laneLayout.gridBounds.left,
     laneLayout.gridBounds.top,
     laneLayout.gridBounds.right - laneLayout.gridBounds.left,
     laneLayout.gridBounds.bottom - laneLayout.gridBounds.top,
-    8
+    {
+      roughness: 0.8,
+      bowing: 0.6,
+      stroke: '#94a3b8',
+      strokeWidth: 1,
+      fill: '#fffef8',
+      fillStyle: 'solid',
+      seed: seed + laneLayout.laneIndex * 37 + 9,
+    }
   );
-  ctx.fill();
-  ctx.stroke();
 
   for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
     const x = laneLayout.gridBounds.left + stepIndex * laneLayout.stepWidth;
@@ -513,13 +553,14 @@ function renderLane(
         const tickHeight = laneLayout.stepHeight * ratio;
         const tickCenterY = (laneLayout.gridBounds.top + laneLayout.gridBounds.bottom) / 2;
         const tickX = x + laneLayout.stepWidth / 2;
-        ctx.strokeStyle = colorMap[velocity];
-        ctx.lineWidth = Math.max(3, laneLayout.stepWidth * 0.25);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(tickX, tickCenterY - tickHeight / 2);
-        ctx.lineTo(tickX, tickCenterY + tickHeight / 2);
-        ctx.stroke();
+        const tickWidth = Math.max(3, laneLayout.stepWidth * 0.25);
+        rc.line(
+          tickX,
+          tickCenterY - tickHeight / 2,
+          tickX,
+          tickCenterY + tickHeight / 2,
+          sketchTickLine(colorMap[velocity], tickWidth, seed + laneLayout.laneIndex * 101 + stepIndex + 20)
+        );
       }
     } else if (lane.activeSteps[stepIndex]) {
       const alphaMap: Record<StepVelocity, number> = {
@@ -529,30 +570,41 @@ function renderLane(
         high: 1,
       };
       const inset = velocity === 'high' ? 2 : velocity === 'low' ? 7 : 4;
-      ctx.fillStyle = withAlpha(accentColor, alphaMap[velocity]);
-      ctx.beginPath();
-      ctx.roundRect(
-        x + inset,
-        laneLayout.gridBounds.top + 4,
-        Math.max(4, laneLayout.stepWidth - inset * 2),
-        Math.max(8, laneLayout.stepHeight - 8),
-        6
+      rc.rectangle(
+        x + Math.max(inset, stepInsetX * 0.5),
+        laneLayout.gridBounds.top + stepInsetY,
+        Math.max(4, laneLayout.stepWidth - Math.max(inset, stepInsetX * 0.5) * 2),
+        Math.max(8, laneLayout.stepHeight - stepInsetY * 2),
+        {
+          roughness: 1.4,
+          bowing: 1.0,
+          stroke: accentColor,
+          strokeWidth: 1,
+          fill: withAlpha(accentColor, alphaMap[velocity]),
+          fillStyle: 'hachure',
+          hachureAngle: -41,
+          hachureGap: 4,
+          seed: seed + laneLayout.laneIndex * 101 + stepIndex + 120,
+        }
       );
-      ctx.fill();
     }
 
     if (stepIndex > 0) {
-      ctx.strokeStyle = isBarBoundary ? '#94a3b8' : '#dbe3ed';
-      ctx.lineWidth = isBarBoundary ? 1.5 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x, laneLayout.gridBounds.top + 1);
-      ctx.lineTo(x, laneLayout.gridBounds.bottom - 1);
-      ctx.stroke();
+      rc.line(
+        x,
+        laneLayout.gridBounds.top + 1,
+        x,
+        laneLayout.gridBounds.bottom - 1,
+        isBarBoundary
+          ? sketchGridMajor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
+          : sketchGridMinor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
+      );
     }
   }
 
   if (currentStep !== null) {
-    const playheadX = laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
+    const playheadX =
+      laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
     ctx.strokeStyle = '#f97316';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -564,15 +616,20 @@ function renderLane(
   ctx.restore();
 }
 
-function renderAddLaneButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox): void {
+function renderAddLaneButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
   ctx.save();
-  ctx.fillStyle = '#ffffff';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 8);
-  ctx.fill();
-  ctx.stroke();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed + 400)
+  );
 
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
@@ -585,53 +642,67 @@ function renderAddLaneButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox)
   ctx.lineTo(centerX, centerY + 6);
   ctx.stroke();
 
-  ctx.fillStyle = '#667085';
-  ctx.font = '10px sans-serif';
+  ctx.fillStyle = '#64748b';
+  ctx.font = '14px "Caveat", cursive';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('Add lane', bounds.right + 8, centerY);
   ctx.restore();
 }
 
-function renderRemoveButton(ctx: CanvasRenderingContext2D, bounds: BoundingBox): void {
+function renderRemoveButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
   ctx.save();
-  ctx.fillStyle = '#ffffff';
+  rc.rectangle(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, {
+    roughness: 1.0,
+    bowing: 0.7,
+    stroke: '#c2410c',
+    strokeWidth: 1.2,
+    fill: '#fff7ed',
+    fillStyle: 'solid',
+    seed,
+  });
+
   ctx.strokeStyle = '#c2410c';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 5);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.strokeStyle = '#c2410c';
-  ctx.beginPath();
-  ctx.moveTo(bounds.left + 4, bounds.top + 4);
-  ctx.lineTo(bounds.right - 4, bounds.bottom - 4);
-  ctx.moveTo(bounds.right - 4, bounds.top + 4);
-  ctx.lineTo(bounds.left + 4, bounds.bottom - 4);
+  ctx.moveTo(bounds.left + 3.5, bounds.top + 3.5);
+  ctx.lineTo(bounds.right - 3.5, bounds.bottom - 3.5);
+  ctx.moveTo(bounds.right - 3.5, bounds.top + 3.5);
+  ctx.lineTo(bounds.left + 3.5, bounds.bottom - 3.5);
   ctx.stroke();
   ctx.restore();
 }
 
 function renderOpenInstrumentMenu(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
-  layout: ReturnType<typeof getMidiLayout>
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
 ): void {
   if (!element.openInstrumentLaneId) return;
 
-  const laneLayout = layout.lanes.find((lane) => element.lanes[lane.laneIndex]?.id === element.openInstrumentLaneId);
+  const laneLayout = layout.lanes.find(
+    (lane) => element.lanes[lane.laneIndex]?.id === element.openInstrumentLaneId
+  );
   if (!laneLayout) return;
 
   ctx.save();
   const bounds = laneLayout.instrumentMenuBounds;
-  ctx.fillStyle = 'rgba(255, 250, 240, 0.98)';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.roundRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, 8);
-  ctx.fill();
-  ctx.stroke();
+  rc.rectangle(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, {
+    roughness: 1.0,
+    bowing: 0.7,
+    stroke: '#2f3b52',
+    strokeWidth: 1.4,
+    fill: '#fffaf0',
+    fillStyle: 'solid',
+    seed: seed + 500 + laneLayout.laneIndex,
+  });
 
   MIDI_LANE_INSTRUMENTS.forEach((instrument, index) => {
     const rowTop = bounds.top + index * 22;
@@ -647,7 +718,7 @@ function renderOpenInstrumentMenu(
     ctx.fill();
 
     ctx.fillStyle = '#2f3b52';
-    ctx.font = '10px sans-serif';
+    ctx.font = '14px "Caveat", cursive';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(getInstrumentLabel(instrument), bounds.left + 20, rowTop + 11);
@@ -655,10 +726,27 @@ function renderOpenInstrumentMenu(
   ctx.restore();
 }
 
+function replayPaths(
+  ctx: CanvasRenderingContext2D,
+  paths: Array<Array<{ x: number; y: number }>>
+): void {
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(path[i].x, path[i].y);
+    }
+    ctx.stroke();
+  }
+}
+
 function renderAutomationLane(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
-  layout: ReturnType<typeof getMidiLayout>
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
 ): void {
   if (!layout.automationLaneBounds) return;
 
@@ -666,38 +754,25 @@ function renderAutomationLane(
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1.5;
 
-  ctx.beginPath();
-  ctx.moveTo(lane.left, lane.top);
-  ctx.lineTo(lane.left, lane.bottom);
-  ctx.lineTo(lane.right, lane.bottom);
-  ctx.lineTo(lane.right, lane.top);
-  ctx.stroke();
+  const borderOpts = sketchAutoBorder(seed + 600);
+  rc.line(lane.left, lane.top, lane.left, lane.bottom, borderOpts);
+  rc.line(lane.left, lane.bottom, lane.right, lane.bottom, borderOpts);
+  rc.line(lane.right, lane.bottom, lane.right, lane.top, borderOpts);
 
   if (element.automationCurvePaths) {
-    ctx.strokeStyle = '#0f766e';
-    for (const path of element.automationCurvePaths) {
-      if (path.length < 2) continue;
-      ctx.beginPath();
-      ctx.moveTo(path[0].x, path[0].y);
-      for (let i = 1; i < path.length; i++) {
-        ctx.lineTo(path[i].x, path[i].y);
-      }
-      ctx.stroke();
-    }
+    ctx.strokeStyle = '#2f3b52';
+    ctx.lineWidth = 1.5;
+    replayPaths(ctx, element.automationCurvePaths);
   }
 
   const indicatorW = 36;
   const indicatorH = 20;
   const indicatorX = lane.left + 4;
   const indicatorY = lane.top + 4;
-  ctx.strokeStyle = '#2f3b52';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);
+  rc.rectangle(indicatorX, indicatorY, indicatorW, indicatorH, sketchVolBox(seed + 601));
   ctx.fillStyle = '#2f3b52';
-  ctx.font = 'bold 11px sans-serif';
+  ctx.font = 'bold 15px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
@@ -713,7 +788,9 @@ function getLaneAccentColor(instrument: MidiInstrument): string {
 
 function withAlpha(hexColor: string, alpha: number): string {
   const safeAlpha = Math.max(0, Math.min(1, alpha));
-  const alphaHex = Math.round(safeAlpha * 255).toString(16).padStart(2, '0');
+  const alphaHex = Math.round(safeAlpha * 255)
+    .toString(16)
+    .padStart(2, '0');
   return `${hexColor}${alphaHex}`;
 }
 

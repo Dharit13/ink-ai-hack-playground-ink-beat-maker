@@ -1,4 +1,4 @@
-﻿import type { BoundingBox, TransformableElement } from '../../types/primitives';
+import type { BoundingBox, TransformableElement } from '../../types/primitives';
 import { generateId } from '../../types/primitives';
 
 export type MidiInstrument =
@@ -47,9 +47,9 @@ export interface MidiElement extends TransformableElement {
 export const DEFAULT_MIDI_STEPS = 16;
 export const DEFAULT_MIDI_TEMPO = 120;
 export const MIDI_MIN_WIDTH = 520;
-export const MIDI_MIN_HEIGHT = 108;
+export const MIDI_MIN_HEIGHT = 132;
 export const MIDI_LANE_HEIGHT = 56;
-export const MIDI_HEADER_HEIGHT = 24;
+export const MIDI_HEADER_HEIGHT = 40;
 export const MIDI_ADD_BUTTON_SIZE = 24;
 export const MIDI_LANE_GAP = 6;
 export const MIDI_BODY_TOP_OFFSET = 12;
