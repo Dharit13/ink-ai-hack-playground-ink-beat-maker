@@ -12,6 +12,7 @@ import { primeMidiAudio } from './renderer';
 import {
   createMidiLane,
   getMidiHeightForLaneCount,
+  MIDI_AUTOMATION_MIN_HEIGHT,
   MIDI_LANE_INSTRUMENTS,
   MIDI_MIN_HEIGHT,
   normalizeMidiElement,
@@ -19,8 +20,6 @@ import {
 
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
-const AUTOMATION_GAP = 8;
-const AUTOMATION_HEIGHT = 80;
 const MENU_ROW_HEIGHT = 22;
 
 function boundingBoxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
@@ -242,21 +241,12 @@ function addLane(element: MidiElement): MidiElement {
   const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
   const lanes = [...normalized.lanes, createMidiLane(normalized.steps, nextInstrument)];
   const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
-  const heightDelta = nextHeight - normalized.height;
 
   return {
     ...normalized,
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    automationTopY:
-      normalized.automationEnabled && normalized.automationTopY !== undefined
-        ? normalized.automationTopY + heightDelta
-        : normalized.automationTopY,
-    automationBottomY:
-      normalized.automationEnabled && normalized.automationBottomY !== undefined
-        ? normalized.automationBottomY + heightDelta
-        : normalized.automationBottomY,
   };
 }
 
@@ -266,21 +256,12 @@ function removeLane(element: MidiElement, laneIndex: number): MidiElement {
 
   const lanes = normalized.lanes.filter((_, index) => index !== laneIndex);
   const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
-  const heightDelta = nextHeight - normalized.height;
 
   return {
     ...normalized,
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    automationTopY:
-      normalized.automationEnabled && normalized.automationTopY !== undefined
-        ? normalized.automationTopY + heightDelta
-        : normalized.automationTopY,
-    automationBottomY:
-      normalized.automationEnabled && normalized.automationBottomY !== undefined
-        ? normalized.automationBottomY + heightDelta
-        : normalized.automationBottomY,
   };
 }
 
@@ -342,6 +323,24 @@ function getStepVolumesFromStrokes(
   }
 
   return updatedVolumes;
+}
+
+function normalizeAutomationCurvePaths(
+  strokes: Stroke[],
+  automationLaneBounds: BoundingBox
+): Array<Array<{ x: number; y: number }>> {
+  const width = automationLaneBounds.right - automationLaneBounds.left;
+  const height = automationLaneBounds.bottom - automationLaneBounds.top;
+  if (width <= 0 || height <= 0) return [];
+
+  return strokes
+    .map((stroke) =>
+      stroke.inputs.inputs.map((point) => ({
+        x: Math.max(0, Math.min(1, (point.x - automationLaneBounds.left) / width)),
+        y: Math.max(0, Math.min(1, (point.y - automationLaneBounds.top) / height)),
+      }))
+    )
+    .filter((path) => path.length > 1);
 }
 
 export function isInterestedIn(
@@ -457,14 +456,17 @@ export async function acceptInk(
 
     if (strokesInLane.length > 0) {
       const updatedVolumes = getStepVolumesFromStrokes(normalized, strokesInLane, layout.automationLaneBounds);
-      const curvePaths = strokesInLane.map((stroke) =>
-        stroke.inputs.inputs.map((point) => ({ x: point.x, y: point.y }))
+      const automationCurvePaths = normalizeAutomationCurvePaths(
+        strokesInLane,
+        layout.automationLaneBounds
       );
       return {
         element: {
           ...normalized,
           stepVolumes: updatedVolumes,
-          automationCurvePaths: curvePaths,
+          automationHasData: true,
+          automationUPaths: undefined,
+          automationCurvePaths,
           openInstrumentLaneId: null,
         },
         consumed: true,
@@ -495,22 +497,20 @@ export async function acceptInk(
         strokeTop = Math.min(strokeTop, bounds.top);
         strokeBottom = Math.max(strokeBottom, bounds.bottom);
       }
-      const drawnHeight = Math.max(AUTOMATION_HEIGHT, strokeBottom - strokeTop);
-      const firstLane = layout.lanes[0];
-      const automationTop = layout.addLaneBounds.bottom + AUTOMATION_GAP;
-
+      const drawnHeight = Math.max(MIDI_AUTOMATION_MIN_HEIGHT, strokeBottom - strokeTop);
       return {
         element: {
           ...normalized,
           automationEnabled: true,
-          automationTopY: automationTop,
-          automationBottomY: automationTop + drawnHeight,
-          automationLeftX: firstLane.gridBounds.left,
-          automationRightX: firstLane.gridBounds.right,
+          automationHeight: drawnHeight,
+          automationHasData: false,
+          stepVolumes: [...normalized.stepVolumes],
+          automationTopY: undefined,
+          automationBottomY: undefined,
+          automationLeftX: undefined,
+          automationRightX: undefined,
           automationUPaths: undefined,
-          automationCurvePaths: strokesInZone.map((stroke) =>
-            stroke.inputs.inputs.map((point) => ({ x: point.x, y: point.y }))
-          ),
+          automationCurvePaths: undefined,
           openInstrumentLaneId: null,
         },
         consumed: true,

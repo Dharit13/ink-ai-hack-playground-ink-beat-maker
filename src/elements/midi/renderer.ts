@@ -726,19 +726,68 @@ function renderOpenInstrumentMenu(
   ctx.restore();
 }
 
-function replayPaths(
+function renderAutomationCurve(
   ctx: CanvasRenderingContext2D,
-  paths: Array<Array<{ x: number; y: number }>>
+  element: MidiElement,
+  lane: BoundingBox
 ): void {
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(path[0].x, path[0].y);
-    for (let i = 1; i < path.length; i++) {
-      ctx.lineTo(path[i].x, path[i].y);
+  if (!element.automationHasData) return;
+
+  const innerLeft = lane.left + 8;
+  const innerRight = lane.right - 8;
+  const innerTop = lane.top + 8;
+  const innerBottom = lane.bottom - 8;
+  const innerHeight = innerBottom - innerTop;
+  const drawableWidth = innerRight - innerLeft;
+  if (innerHeight <= 0 || drawableWidth <= 0) return;
+
+  ctx.save();
+  ctx.strokeStyle = '#0f766e';
+  ctx.lineWidth = 2;
+  const curvePaths = element.automationCurvePaths ?? [];
+
+  if (curvePaths.length > 0) {
+    for (const path of curvePaths) {
+      if (path.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(
+        innerLeft + path[0].x * drawableWidth,
+        innerTop + path[0].y * innerHeight
+      );
+      for (let i = 1; i < path.length; i++) {
+        ctx.lineTo(
+          innerLeft + path[i].x * drawableWidth,
+          innerTop + path[i].y * innerHeight
+        );
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+    ctx.restore();
+    return;
   }
+
+  if (element.steps > 0) {
+    const stepWidth = drawableWidth / element.steps;
+    const points = Array.from({ length: element.steps }, (_, index) => {
+      const volume = Math.max(0, Math.min(1, element.stepVolumes[index] ?? 1));
+      return {
+        x: innerLeft + stepWidth * index + stepWidth / 2,
+        y: innerBottom - volume * innerHeight,
+      };
+    });
+
+    if (points.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(innerLeft, points[0].y);
+      for (const point of points) {
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.lineTo(innerRight, points[points.length - 1].y);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
 }
 
 function renderAutomationLane(
@@ -760,12 +809,6 @@ function renderAutomationLane(
   rc.line(lane.left, lane.bottom, lane.right, lane.bottom, borderOpts);
   rc.line(lane.right, lane.bottom, lane.right, lane.top, borderOpts);
 
-  if (element.automationCurvePaths) {
-    ctx.strokeStyle = '#2f3b52';
-    ctx.lineWidth = 1.5;
-    replayPaths(ctx, element.automationCurvePaths);
-  }
-
   const indicatorW = 36;
   const indicatorH = 20;
   const indicatorX = lane.left + 4;
@@ -776,6 +819,8 @@ function renderAutomationLane(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+
+  renderAutomationCurve(ctx, element, lane);
 
   ctx.restore();
 }

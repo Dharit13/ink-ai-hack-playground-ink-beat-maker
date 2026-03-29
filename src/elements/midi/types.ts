@@ -31,10 +31,14 @@ export interface MidiElement extends TransformableElement {
   inputMode: MidiInputMode;
   automationEnabled: boolean;
   stepVolumes: number[];
+  automationHeight?: number;
+  automationHasData?: boolean;
+  // Legacy absolute automation bounds kept optional so older saved notes can still load.
   automationTopY?: number;
   automationBottomY?: number;
   automationLeftX?: number;
   automationRightX?: number;
+  // Automation curves are stored as lane-relative points so they follow move/resize.
   automationUPaths?: Array<Array<{ x: number; y: number }>>;
   automationCurvePaths?: Array<Array<{ x: number; y: number }>>;
   openInstrumentLaneId?: string | null;
@@ -48,6 +52,7 @@ export const DEFAULT_MIDI_STEPS = 16;
 export const DEFAULT_MIDI_TEMPO = 120;
 export const MIDI_MIN_WIDTH = 520;
 export const MIDI_MIN_HEIGHT = 132;
+export const MIDI_AUTOMATION_MIN_HEIGHT = 80;
 export const MIDI_LANE_HEIGHT = 56;
 export const MIDI_HEADER_HEIGHT = 40;
 export const MIDI_ADD_BUTTON_SIZE = 24;
@@ -121,6 +126,8 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
       height: getMidiHeightForLaneCount(element.lanes.length),
       inputMode: element.inputMode ?? 'tap',
       automationEnabled: element.automationEnabled ?? false,
+      automationHeight: getAutomationHeight(element),
+      automationHasData: getAutomationHasData(element),
       stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
     };
@@ -140,6 +147,8 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
     height: getMidiHeightForLaneCount(1),
     inputMode: element.inputMode ?? 'tap',
     automationEnabled: element.automationEnabled ?? false,
+    automationHeight: getAutomationHeight(element),
+    automationHasData: getAutomationHasData(element),
     stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
     openInstrumentLaneId: null,
   };
@@ -163,6 +172,35 @@ function ensureVelocityLength(
 
 function ensureVolumeLength(stepVolumes: number[], steps: number): number[] {
   return Array.from({ length: steps }, (_, index) => stepVolumes[index] ?? 1.0);
+}
+
+function getAutomationHeight(element: MidiElement): number | undefined {
+  if (!(element.automationEnabled ?? false)) return undefined;
+
+  if (typeof element.automationHeight === 'number') {
+    return Math.max(MIDI_AUTOMATION_MIN_HEIGHT, element.automationHeight);
+  }
+
+  if (
+    typeof element.automationTopY === 'number' &&
+    typeof element.automationBottomY === 'number'
+  ) {
+    return Math.max(MIDI_AUTOMATION_MIN_HEIGHT, element.automationBottomY - element.automationTopY);
+  }
+
+  return MIDI_AUTOMATION_MIN_HEIGHT;
+}
+
+function getAutomationHasData(element: MidiElement): boolean {
+  if (typeof element.automationHasData === 'boolean') {
+    return element.automationHasData;
+  }
+
+  if ((element.automationCurvePaths?.length ?? 0) > 0 || (element.automationUPaths?.length ?? 0) > 0) {
+    return true;
+  }
+
+  return (element.stepVolumes ?? []).some((volume) => volume !== 1.0);
 }
 
 export function createMidiElement(bounds: BoundingBox): MidiElement {
