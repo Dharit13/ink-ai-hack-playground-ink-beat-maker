@@ -21,6 +21,11 @@ npm run preview          # Preview production build
 
 There is no test framework configured — no unit or integration tests exist.
 
+## Git Hooks
+
+A pre-push hook runs `npm run lint` and `npm run build` before every push.
+Run `npm run setup` once after cloning to activate it (`git config core.hooksPath .githooks`).
+
 ## Git Conventions
 
 - Branch naming: `feature/INK-00/description`, `bug/INK-00/description`, `chore/INK-00/description`

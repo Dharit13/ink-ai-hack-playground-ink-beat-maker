@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -e
+
+echo "Running pre-push checks..."
+
+echo ""
+echo "--- Lint ---"
+npm run lint
+
+echo ""
+echo "--- Build ---"
+npm run build
+
+echo ""
+echo "Pre-push checks passed. Pushing..."

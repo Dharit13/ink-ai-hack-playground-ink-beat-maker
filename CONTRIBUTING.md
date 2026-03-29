@@ -14,11 +14,15 @@ Thanks for your interest in contributing! This guide will help you get set up an
    ```bash
    npm install
    ```
-4. **Set up environment**:
+4. **Set up git hooks** (one-time — blocks pushing broken builds):
+   ```bash
+   npm run setup
+   ```
+5. **Set up environment**:
    ```bash
    cp .env.example .env
    ```
-5. **Start the dev server**:
+6. **Start the dev server**:
    ```bash
    npm run dev
    ```
@@ -40,6 +44,7 @@ Thanks for your interest in contributing! This guide will help you get set up an
    npm run lint     # Check for lint errors
    npm run build    # Ensure it compiles
    ```
+   Both checks also run automatically as a pre-push hook (requires `npm run setup` after cloning). Use `git push --no-verify` to bypass in emergencies.
 
 3. Commit with a descriptive message:
    ```bash
