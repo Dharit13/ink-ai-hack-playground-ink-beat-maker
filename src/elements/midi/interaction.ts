@@ -1,7 +1,7 @@
 import type { BoundingBox, Offset, Stroke } from '../../types';
 import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlugin';
 import type { MidiElement } from './types';
-import { getMidiBounds, getMidiLayout, getMidiStepBounds } from './layout';
+import { getMidiInteractionBounds, getMidiLayout, getMidiStepBounds } from './layout';
 import { primeMidiAudio } from './renderer';
 import {
   createMidiLane,
@@ -244,7 +244,7 @@ export function isInterestedIn(
   _strokes: Stroke[],
   strokeBounds: BoundingBox
 ): boolean {
-  return boundingBoxesOverlap(getMidiBounds(normalizeMidiElement(element)), strokeBounds);
+  return boundingBoxesOverlap(getMidiInteractionBounds(normalizeMidiElement(element)), strokeBounds);
 }
 
 export async function acceptInk(

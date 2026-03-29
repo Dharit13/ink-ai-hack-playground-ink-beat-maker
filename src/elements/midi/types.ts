@@ -36,6 +36,10 @@ export const MIDI_MIN_HEIGHT = 108;
 export const MIDI_LANE_HEIGHT = 56;
 export const MIDI_HEADER_HEIGHT = 24;
 export const MIDI_ADD_BUTTON_SIZE = 24;
+export const MIDI_LANE_GAP = 6;
+export const MIDI_BODY_TOP_OFFSET = 12;
+export const MIDI_FOOTER_GAP = 8;
+export const MIDI_BOTTOM_PADDING = 10;
 export const MIDI_LANE_INSTRUMENTS: MidiInstrument[] = [
   'snare',
   'closedHat',
@@ -77,7 +81,16 @@ export function createMidiLane(
 }
 
 export function getMidiHeightForLaneCount(laneCount: number): number {
-  return MIDI_HEADER_HEIGHT + laneCount * MIDI_LANE_HEIGHT + MIDI_ADD_BUTTON_SIZE + 24;
+  const laneSectionHeight =
+    laneCount * MIDI_LANE_HEIGHT + Math.max(0, laneCount - 1) * MIDI_LANE_GAP;
+  return (
+    MIDI_HEADER_HEIGHT +
+    MIDI_BODY_TOP_OFFSET +
+    laneSectionHeight +
+    MIDI_FOOTER_GAP +
+    MIDI_ADD_BUTTON_SIZE +
+    MIDI_BOTTOM_PADDING
+  );
 }
 
 export function normalizeMidiElement(element: MidiElement): MidiElement {

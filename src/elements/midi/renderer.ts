@@ -7,7 +7,7 @@ import {
   type MidiElement,
   type MidiInstrument,
 } from './types';
-import { getMidiBounds, getMidiLayout } from './layout';
+import { getMidiBounds, getMidiInteractionBounds, getMidiLayout } from './layout';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -595,5 +595,5 @@ function getLaneAccentColor(instrument: MidiInstrument): string {
 }
 
 export function getBounds(element: MidiElement): BoundingBox | null {
-  return getMidiBounds(normalizeMidiElement(element));
+  return getMidiInteractionBounds(normalizeMidiElement(element));
 }
