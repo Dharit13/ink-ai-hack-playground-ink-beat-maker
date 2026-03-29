@@ -15,6 +15,7 @@ import { exportMidiFile } from './midiExport';
 import {
   createMidiLane,
   getMidiHeightForLaneCount,
+  MIDI_AUTOMATION_MIN_HEIGHT,
   MIDI_LANE_INSTRUMENTS,
   MIDI_MIN_HEIGHT,
   normalizeMidiElement,
@@ -22,9 +23,16 @@ import {
 
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
-const AUTOMATION_GAP = 8;
-const AUTOMATION_HEIGHT = 80;
 const MENU_ROW_HEIGHT = 22;
+const TAP_TEMPO_IDLE_RESET_MS = 2500;
+const TAP_TEMPO_MIN_INTERVAL_MS = 250;
+const TAP_TEMPO_MAX_INTERVAL_MS = 1500;
+const TAP_TEMPO_MIN_TAPS = 3;
+const TAP_TEMPO_MAX_INTERVAL_SAMPLES = 4;
+const TAP_TEMPO_MIN_BPM = 40;
+const TAP_TEMPO_MAX_BPM = 240;
+
+const tapTempoHistory = new Map<string, number[]>();
 
 function boundingBoxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
@@ -166,6 +174,46 @@ function getCoverageRatio(strokes: Stroke[], bounds: BoundingBox): number {
   return filledPixels / (width * height);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function applyTapTempo(element: MidiElement, tapTime: number): MidiElement {
+  const previousTaps = tapTempoHistory.get(element.id) ?? [];
+  const lastTap = previousTaps[previousTaps.length - 1];
+
+  if (lastTap === undefined || tapTime - lastTap > TAP_TEMPO_IDLE_RESET_MS) {
+    tapTempoHistory.set(element.id, [tapTime]);
+    return element;
+  }
+
+  const interval = tapTime - lastTap;
+  if (interval < TAP_TEMPO_MIN_INTERVAL_MS || interval > TAP_TEMPO_MAX_INTERVAL_MS) {
+    tapTempoHistory.set(element.id, [tapTime]);
+    return element;
+  }
+
+  const taps = [...previousTaps, tapTime].slice(-(TAP_TEMPO_MAX_INTERVAL_SAMPLES + 1));
+  tapTempoHistory.set(element.id, taps);
+
+  if (taps.length < TAP_TEMPO_MIN_TAPS) {
+    return element;
+  }
+
+  const intervals = taps.slice(1).map((value, index) => value - taps[index]);
+  const averageInterval = intervals.reduce((sum, value) => sum + value, 0) / intervals.length;
+  const nextTempo = clamp(
+    Math.round(60000 / averageInterval),
+    TAP_TEMPO_MIN_BPM,
+    TAP_TEMPO_MAX_BPM
+  );
+
+  return {
+    ...element,
+    tempo: nextTempo,
+  };
+}
+
 function getTargetCells(
   element: MidiElement,
   strokes: Stroke[]
@@ -257,21 +305,12 @@ function addLane(element: MidiElement): MidiElement {
   const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
   const lanes = [...normalized.lanes, createMidiLane(normalized.steps, nextInstrument)];
   const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
-  const heightDelta = nextHeight - normalized.height;
 
   return {
     ...normalized,
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    automationTopY:
-      normalized.automationEnabled && normalized.automationTopY !== undefined
-        ? normalized.automationTopY + heightDelta
-        : normalized.automationTopY,
-    automationBottomY:
-      normalized.automationEnabled && normalized.automationBottomY !== undefined
-        ? normalized.automationBottomY + heightDelta
-        : normalized.automationBottomY,
   };
 }
 
@@ -281,21 +320,12 @@ function removeLane(element: MidiElement, laneIndex: number): MidiElement {
 
   const lanes = normalized.lanes.filter((_, index) => index !== laneIndex);
   const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
-  const heightDelta = nextHeight - normalized.height;
 
   return {
     ...normalized,
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    automationTopY:
-      normalized.automationEnabled && normalized.automationTopY !== undefined
-        ? normalized.automationTopY + heightDelta
-        : normalized.automationTopY,
-    automationBottomY:
-      normalized.automationEnabled && normalized.automationBottomY !== undefined
-        ? normalized.automationBottomY + heightDelta
-        : normalized.automationBottomY,
   };
 }
 
@@ -364,6 +394,24 @@ function isDownloadGesture(recognitionResult?: HandwritingRecognitionResult): bo
   return text === 'download' || text === 'dl';
 }
 
+function normalizeAutomationCurvePaths(
+  strokes: Stroke[],
+  automationLaneBounds: BoundingBox
+): Array<Array<{ x: number; y: number }>> {
+  const width = automationLaneBounds.right - automationLaneBounds.left;
+  const height = automationLaneBounds.bottom - automationLaneBounds.top;
+  if (width <= 0 || height <= 0) return [];
+
+  return strokes
+    .map((stroke) =>
+      stroke.inputs.inputs.map((point) => ({
+        x: Math.max(0, Math.min(1, (point.x - automationLaneBounds.left) / width)),
+        y: Math.max(0, Math.min(1, (point.y - automationLaneBounds.top) / height)),
+      }))
+    )
+    .filter((path) => path.length > 1);
+}
+
 export function isInterestedIn(
   element: MidiElement,
   _strokes: Stroke[],
@@ -409,7 +457,20 @@ export async function acceptInk(
   const mode = normalized.inputMode ?? 'tap';
 
   if (strokes.length === 1) {
-    const center = getStrokeCenter(strokes[0]);
+    const stroke = strokes[0];
+    const center = getStrokeCenter(stroke);
+
+    if (
+      center &&
+      isTapStroke(stroke) &&
+      pointInBounds(center, layout.tapTempoButtonBounds)
+    ) {
+      return {
+        element: applyTapTempo(normalized, Date.now()),
+        consumed: true,
+        strokesConsumed: strokes,
+      };
+    }
 
     if (center && pointInBounds(center, layout.playButtonBounds)) {
       await primeMidiAudio();
@@ -501,14 +562,17 @@ export async function acceptInk(
 
     if (strokesInLane.length > 0) {
       const updatedVolumes = getStepVolumesFromStrokes(normalized, strokesInLane, layout.automationLaneBounds);
-      const curvePaths = strokesInLane.map((stroke) =>
-        stroke.inputs.inputs.map((point) => ({ x: point.x, y: point.y }))
+      const automationCurvePaths = normalizeAutomationCurvePaths(
+        strokesInLane,
+        layout.automationLaneBounds
       );
       return {
         element: {
           ...normalized,
           stepVolumes: updatedVolumes,
-          automationCurvePaths: curvePaths,
+          automationHasData: true,
+          automationUPaths: undefined,
+          automationCurvePaths,
           openInstrumentLaneId: null,
         },
         consumed: true,
@@ -539,22 +603,20 @@ export async function acceptInk(
         strokeTop = Math.min(strokeTop, bounds.top);
         strokeBottom = Math.max(strokeBottom, bounds.bottom);
       }
-      const drawnHeight = Math.max(AUTOMATION_HEIGHT, strokeBottom - strokeTop);
-      const firstLane = layout.lanes[0];
-      const automationTop = layout.addLaneBounds.bottom + AUTOMATION_GAP;
-
+      const drawnHeight = Math.max(MIDI_AUTOMATION_MIN_HEIGHT, strokeBottom - strokeTop);
       return {
         element: {
           ...normalized,
           automationEnabled: true,
-          automationTopY: automationTop,
-          automationBottomY: automationTop + drawnHeight,
-          automationLeftX: firstLane.gridBounds.left,
-          automationRightX: firstLane.gridBounds.right,
+          automationHeight: drawnHeight,
+          automationHasData: false,
+          stepVolumes: [...normalized.stepVolumes],
+          automationTopY: undefined,
+          automationBottomY: undefined,
+          automationLeftX: undefined,
+          automationRightX: undefined,
           automationUPaths: undefined,
-          automationCurvePaths: strokesInZone.map((stroke) =>
-            stroke.inputs.inputs.map((point) => ({ x: point.x, y: point.y }))
-          ),
+          automationCurvePaths: undefined,
           openInstrumentLaneId: null,
         },
         consumed: true,

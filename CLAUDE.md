@@ -62,6 +62,13 @@ Run `npm run setup` once after cloning to activate it (`git config core.hooksPat
 
 **Stroke Lifecycle**: Pointer events → StrokeBuilder → finishedStrokesRef (overlay) → debounce (150ms) → processStrokes → noteElements (main canvas). Strokes clear from overlay when they appear in noteElements.
 
+**MIDI Element**: The MIDI sequencer is a registered element plugin in `src/elements/midi/`.
+
+- `types.ts` defines the serialized element shape, step state, and automation-lane fields
+- `layout.ts` centralizes header, lane, step, and automation bounds
+- `renderer.ts` handles playback animation and sketch-style rendering using `roughjs`
+- `interaction.ts` handles taps, drag-to-set velocity, mode toggle, playback toggle, resize, and automation lane drawing below the main sequencer
+
 ### Key Files
 
 | Purpose | Path |
@@ -71,6 +78,8 @@ Run `npm run setup` once after cloning to activate it (`git config core.hooksPat
 | Element types | `src/types/elements.ts` |
 | Element registry | `src/elements/registry/ElementRegistry.ts` |
 | Plugin interface | `src/elements/registry/ElementPlugin.ts` |
+| MIDI plugin entry | `src/elements/midi/index.ts` |
+| MIDI layout/render/interaction | `src/elements/midi/{layout,renderer,interaction}.ts` |
 | Recognition client | `src/recognition/RecognitionService.ts` |
 | New element guide | `docs/New element HOWTO.md` |
 
@@ -79,6 +88,8 @@ Run `npm run setup` once after cloning to activate it (`git config core.hooksPat
 **Environment**: Copy `.env.example` to `.env` and fill in your API keys. `INK_RECOGNITION_API_URL` must be set to a running recognition service endpoint.
 
 **TypeScript**: Strict mode, ES2022 target, react-jsx
+
+**Rendering dependencies**: The MIDI element uses `roughjs` for sketch-style canvas rendering, and `index.html` loads the Caveat font used in the MIDI UI.
 
 ## Type System
 
