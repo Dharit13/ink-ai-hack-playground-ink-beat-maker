@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { NoteElements, Element, Stroke, Brush } from '../types';
 import type { InkTextElement } from '../elements/inktext/types';
+import { beginMidiRenderFrame, endMidiRenderFrame, hasActiveMidiPlayback } from '../elements/midi/renderer';
 import { hasActiveTransitions as hasActiveImageTransitions } from '../elements/sketchableimage/renderer';
 import { hasActiveTicTacToeAnimations } from '../elements/tictactoe/renderer';
 import type { Viewport } from './ViewportManager';
@@ -334,6 +335,7 @@ export function InkCanvas({
     if (!ctx) return;
 
     const now = timestamp ?? performance.now();
+    beginMidiRenderFrame(now);
 
     // Clear canvas with background
     resetContextTransform(ctx);
@@ -374,6 +376,7 @@ export function InkCanvas({
         renderElement(ctx, element);
       }
     }
+    endMidiRenderFrame();
 
     // Notify about completed animations
     for (const id of completedAnimations) {
@@ -398,7 +401,13 @@ export function InkCanvas({
     const hasGenerating = noteElements.elements.some(
       el => 'isGenerating' in el && (el as Record<string, unknown>).isGenerating === true
     );
-    if (hasActiveAnimations || hasGenerating || hasActiveImageTransitions() || hasActiveTicTacToeAnimations()) {
+    if (
+      hasActiveAnimations ||
+      hasGenerating ||
+      hasActiveImageTransitions() ||
+      hasActiveTicTacToeAnimations() ||
+      hasActiveMidiPlayback()
+    ) {
       animationFrameRef.current = requestAnimationFrame(render);
     }
   }, [noteElements, viewport, canvasSize, showDebugOverlay, animatingElements, animationDuration, getSizeMultiplier, onAnimationComplete, selectedElementIds]);
@@ -525,7 +534,10 @@ export function InkCanvas({
     el => 'isGenerating' in el && (el as Record<string, unknown>).isGenerating === true
   );
   useEffect(() => {
-    const shouldAnimate = (animatingElements && animatingElements.size > 0) || hasGeneratingElements;
+    const shouldAnimate =
+      (animatingElements && animatingElements.size > 0) ||
+      hasGeneratingElements ||
+      hasActiveMidiPlayback();
     if (shouldAnimate) {
       // Cancel any existing animation frame
       if (animationFrameRef.current !== null) {
