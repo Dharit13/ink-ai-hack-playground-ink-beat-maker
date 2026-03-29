@@ -25,24 +25,3 @@ jobs:
 
       - name: TypeScript
         run: npx tsc --noEmit
-
-  deploy:
-    name: Deploy to Vercel
-    needs: check
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - run: npm ci
-
-      - name: Deploy
-        run: npx vercel --prod --token ${{ secrets.VERCEL_TOKEN }} --yes
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
