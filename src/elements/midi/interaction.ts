@@ -1,8 +1,11 @@
 import type { BoundingBox, Offset, Stroke } from '../../types';
 import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlugin';
+import type { HandwritingRecognitionResult } from '../../recognition/RecognitionService';
+import { getRecognitionService } from '../../recognition/RecognitionService';
 import type { MidiElement, MidiInputMode, StepVelocity } from './types';
 import { getAutomationZoneBounds, getMidiBounds, getMidiLayout, getMidiStepBounds } from './layout';
 import { primeMidiAudio } from './renderer';
+import { exportMidiFile } from './midiExport';
 
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
@@ -221,15 +224,42 @@ function getStepVolumesFromStrokes(
   return updatedVolumes;
 }
 
+function isDownloadGesture(recognitionResult?: HandwritingRecognitionResult): boolean {
+  const text = (recognitionResult?.rawText ?? '').trim().toLowerCase();
+  return text === 'download' || text === 'dl';
+}
+
 export async function acceptInk(
   element: MidiElement,
-  strokes: Stroke[]
+  strokes: Stroke[],
+  recognitionResult?: HandwritingRecognitionResult
 ): Promise<InteractionResult> {
+  // If the strokes are not over any button/lane, try text recognition to detect "download"
+  const midiMainBounds = getMidiBounds(element);
+  const strokesInMain = strokes.some((stroke) => {
+    const bounds = getStrokeBounds(stroke);
+    return bounds ? boundingBoxesOverlap(midiMainBounds, bounds) : false;
+  });
+
+  if (strokesInMain) {
+    let recog = recognitionResult;
+    if (!recog) {
+      try {
+        recog = await getRecognitionService().recognizeGoogle(strokes);
+      } catch {
+        // recognition unavailable — fall through to normal handling
+      }
+    }
+    if (isDownloadGesture(recog)) {
+      exportMidiFile(element);
+      return { element, consumed: true, strokesConsumed: strokes };
+    }
+  }
+
   const layout = getMidiLayout(element);
   const mode: MidiInputMode = element.inputMode ?? 'tap';
   const velocities = [...((element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[])];
 
-  const midiMainBounds = getMidiBounds(element);
   const automationZone = getAutomationZoneBounds(element);
 
   // Check if all strokes are entirely below the main MIDI element (automation creation gesture)

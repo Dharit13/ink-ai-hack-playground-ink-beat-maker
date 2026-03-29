@@ -184,6 +184,12 @@ export function render(
   const textY = (layout.playButtonBounds.top + layout.playButtonBounds.bottom) / 2;
   ctx.fillText(`${element.steps} steps · ${element.tempo} BPM · ${element.instrument}`, layout.toggleModeBounds.right + 8, textY);
 
+  // Download hint — right-aligned in the header
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('write "download" to export .mid', layout.bounds.right - 10, textY);
+
   const mode = element.inputMode ?? 'tap';
   const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];
 
