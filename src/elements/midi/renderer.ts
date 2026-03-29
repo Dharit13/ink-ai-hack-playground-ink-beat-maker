@@ -289,21 +289,24 @@ function renderAutomationLane(
   ctx.strokeStyle = '#2f3b52';
   ctx.lineWidth = 1.5;
 
-  // Replay the user's actual U strokes exactly as drawn — no computer geometry
-  if (element.automationUPaths) {
-    replayPaths(ctx, element.automationUPaths);
-  }
+  // Snapped U border — left/right/bottom aligned to MIDI lane, clean lines
+  ctx.beginPath();
+  ctx.moveTo(lane.left, lane.top);
+  ctx.lineTo(lane.left, lane.bottom);
+  ctx.lineTo(lane.right, lane.bottom);
+  ctx.lineTo(lane.right, lane.top);
+  ctx.stroke();
 
-  // Replay the user's actual curve stroke exactly as drawn
+  // Replay the user's actual curve stroke exactly as drawn — no snapping on this
   if (element.automationCurvePaths) {
     replayPaths(ctx, element.automationCurvePaths);
   }
 
-  // VOL indicator — positioned above the top-left of the automation area, readable size
+  // VOL indicator — sits just inside the top-left corner of the automation lane
   const indicatorW = 36;
   const indicatorH = 20;
-  const indicatorX = lane.left;
-  const indicatorY = lane.top - indicatorH - 6;
+  const indicatorX = lane.left + 4;
+  const indicatorY = lane.top + 4;
   ctx.strokeStyle = '#2f3b52';
   ctx.lineWidth = 1;
   ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);

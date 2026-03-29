@@ -238,29 +238,30 @@ export async function acceptInk(
     });
 
     if (strokesInZone.length > 0) {
-      // Compute combined bounding box of all U strokes
-      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      // Compute the height the user intended from the raw stroke bounds
+      let strokeTop = Infinity, strokeBottom = -Infinity;
       for (const stroke of strokesInZone) {
         const b = getStrokeBounds(stroke);
         if (!b) continue;
-        left = Math.min(left, b.left);
-        top = Math.min(top, b.top);
-        right = Math.max(right, b.right);
-        bottom = Math.max(bottom, b.bottom);
+        strokeTop = Math.min(strokeTop, b.top);
+        strokeBottom = Math.max(strokeBottom, b.bottom);
       }
-      // Store the actual U stroke paths so the user's handwriting is rendered as-is
-      const uPaths = strokesInZone.map(s => s.inputs.inputs.map(p => ({ x: p.x, y: p.y })));
+      const drawnHeight = strokeBottom - strokeTop;
 
+      // Snap left/right to the MIDI lane edges, and top to the MIDI element's bottom
+      // so the box aligns cleanly with the sequencer above it.
+      // Height is preserved from what the user drew.
+      const snappedTop = midiMainBounds.bottom;
       return {
         element: {
           ...element,
           automationEnabled: true,
           stepVolumes: Array.from({ length: element.steps }, () => 1.0),
-          automationTopY: top,
-          automationBottomY: bottom,
-          automationLeftX: left,
-          automationRightX: right,
-          automationUPaths: uPaths,
+          automationTopY: snappedTop,
+          automationBottomY: snappedTop + drawnHeight,
+          automationLeftX: layout.laneBounds.left,
+          automationRightX: layout.laneBounds.right,
+          automationUPaths: undefined,
           automationCurvePaths: undefined,
         },
         consumed: true,
