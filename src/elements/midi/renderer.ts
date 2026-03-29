@@ -31,9 +31,12 @@ export async function primeMidiAudio(): Promise<void> {
   }
 }
 
-function playStepSound(element: MidiElement): void {
+function playStepSound(element: MidiElement, stepIndex: number): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
+
+  const volume = element.stepVolumes?.[stepIndex] ?? 1.0;
+  if (volume <= 0) return;
 
   const now = context.currentTime;
   const oscillator = context.createOscillator();
@@ -49,7 +52,7 @@ function playStepSound(element: MidiElement): void {
   filter.Q.setValueAtTime(0.8, now);
 
   gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(0.2, now + 0.005);
+  gainNode.gain.exponentialRampToValueAtTime(0.7 * volume, now + 0.005);
   gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
 
   oscillator.connect(filter);
@@ -88,7 +91,7 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
     if (element.activeSteps[stepIndex]) {
-      playStepSound(element);
+      playStepSound(element, stepIndex);
     }
   }
 
@@ -163,6 +166,10 @@ export function render(
 
   renderPlayButton(ctx, layout.playButtonBounds, element.isLooping);
   renderLane(ctx, element, layout, currentStep);
+
+  if (element.automationEnabled && layout.automationLaneBounds) {
+    renderAutomationLane(ctx, element, layout);
+  }
 
   ctx.restore();
 }
@@ -256,6 +263,64 @@ function renderLane(
   ctx.restore();
 }
 
+function replayPaths(
+  ctx: CanvasRenderingContext2D,
+  paths: Array<Array<{x: number; y: number}>>
+): void {
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+    ctx.stroke();
+  }
+}
+
+function renderAutomationLane(
+  ctx: CanvasRenderingContext2D,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>
+): void {
+  const lane = layout.automationLaneBounds!;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1.5;
+
+  // Replay the user's actual U strokes exactly as drawn — no computer geometry
+  if (element.automationUPaths) {
+    replayPaths(ctx, element.automationUPaths);
+  }
+
+  // Replay the user's actual curve stroke exactly as drawn
+  if (element.automationCurvePaths) {
+    replayPaths(ctx, element.automationCurvePaths);
+  }
+
+  // VOL indicator — positioned above the top-left of the automation area, readable size
+  const indicatorW = 36;
+  const indicatorH = 20;
+  const indicatorX = lane.left;
+  const indicatorY = lane.top - indicatorH - 6;
+  ctx.strokeStyle = '#2f3b52';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(indicatorX, indicatorY, indicatorW, indicatorH);
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+
+  ctx.restore();
+}
+
 export function getBounds(element: MidiElement): BoundingBox | null {
-  return getMidiBounds(element);
+  const bounds = getMidiBounds(element);
+  if (!element.automationEnabled || element.automationBottomY === undefined) return bounds;
+  return {
+    ...bounds,
+    bottom: element.automationBottomY,
+  };
 }
