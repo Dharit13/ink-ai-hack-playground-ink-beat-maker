@@ -1,5 +1,4 @@
 // TicTacToe creator - recognizes "#" pattern and creates playable game
-//
 
 import type { Stroke } from "../../types";
 import type { Offset } from "../../types/primitives";
