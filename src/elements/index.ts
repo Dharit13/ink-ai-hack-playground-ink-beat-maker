@@ -12,6 +12,7 @@ import './image';
 import './inktext';
 import './jigsaw';
 import './minesweeper';
+import './midi';
 import './nonogram';
 import './queens';
 import './shape';

@@ -14,6 +14,7 @@ import type { ImageElement } from '../elements/image/types';
 import type { SudokuElement } from '../elements/sudoku/types';
 import type { BridgesElement } from '../elements/bridges/types';
 import type { MinesweeperElement } from '../elements/minesweeper/types';
+import type { MidiElement } from '../elements/midi/types';
 import type { NonogramElement } from '../elements/nonogram/types';
 import type { TangoElement } from '../elements/tango/types';
 import type { QueensElement } from '../elements/queens/types';
@@ -33,6 +34,7 @@ export type Element =
   | SudokuElement
   | BridgesElement
   | MinesweeperElement
+  | MidiElement
   | NonogramElement
   | TangoElement
   | QueensElement
