@@ -188,7 +188,7 @@ export function render(
   ctx.font = '9px sans-serif';
   ctx.textAlign = 'right';
   ctx.fillStyle = '#94a3b8';
-  ctx.fillText('write "download" to export .mid', layout.bounds.right - 10, textY);
+  ctx.fillText('write "download" near here to export .mid', layout.bounds.right - 10, textY);
 
   const mode = element.inputMode ?? 'tap';
   const velocities = (element.stepVelocities ?? Array(element.steps).fill('off')) as StepVelocity[];

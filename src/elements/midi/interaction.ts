@@ -177,6 +177,18 @@ function togglePlayState(element: MidiElement): MidiElement {
   };
 }
 
+const DOWNLOAD_ZONE_PADDING = 120;
+
+function getDownloadZoneBounds(element: MidiElement): BoundingBox {
+  const b = getMidiBounds(element);
+  return {
+    left: b.left - DOWNLOAD_ZONE_PADDING,
+    top: b.top - DOWNLOAD_ZONE_PADDING,
+    right: b.right + DOWNLOAD_ZONE_PADDING,
+    bottom: b.bottom + DOWNLOAD_ZONE_PADDING,
+  };
+}
+
 export function isInterestedIn(
   element: MidiElement,
   _strokes: Stroke[],
@@ -184,7 +196,8 @@ export function isInterestedIn(
 ): boolean {
   return (
     boundingBoxesOverlap(getMidiBounds(element), strokeBounds) ||
-    boundingBoxesOverlap(getAutomationZoneBounds(element), strokeBounds)
+    boundingBoxesOverlap(getAutomationZoneBounds(element), strokeBounds) ||
+    boundingBoxesOverlap(getDownloadZoneBounds(element), strokeBounds)
   );
 }
 
@@ -234,14 +247,14 @@ export async function acceptInk(
   strokes: Stroke[],
   recognitionResult?: HandwritingRecognitionResult
 ): Promise<InteractionResult> {
-  // If the strokes are not over any button/lane, try text recognition to detect "download"
-  const midiMainBounds = getMidiBounds(element);
-  const strokesInMain = strokes.some((stroke) => {
+  // Check for "download" gesture — accept strokes anywhere in the padded zone around the element
+  const downloadZone = getDownloadZoneBounds(element);
+  const strokesInDownloadZone = strokes.some((stroke) => {
     const bounds = getStrokeBounds(stroke);
-    return bounds ? boundingBoxesOverlap(midiMainBounds, bounds) : false;
+    return bounds ? boundingBoxesOverlap(downloadZone, bounds) : false;
   });
 
-  if (strokesInMain) {
+  if (strokesInDownloadZone) {
     let recog = recognitionResult;
     if (!recog) {
       try {
