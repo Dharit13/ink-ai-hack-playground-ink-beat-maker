@@ -918,13 +918,13 @@ export async function acceptInk(
       return strokeBounds ? boundingBoxesOverlap(stepBounds, strokeBounds) : false;
     });
 
-    if (mode === 'tick') {
-      if (overlappingStrokes.some(isHorizontalStroke)) {
-        lane.stepVelocities[target.stepIndex] = 'off';
-        lane.activeSteps[target.stepIndex] = false;
-        continue;
-      }
+    if (overlappingStrokes.some(isHorizontalStroke)) {
+      lane.stepVelocities[target.stepIndex] = 'off';
+      lane.activeSteps[target.stepIndex] = false;
+      continue;
+    }
 
+    if (mode === 'tick') {
       const hasTap = overlappingStrokes.some((stroke) => {
         if (!isTapStroke(stroke)) return false;
         const center = getStrokeCenter(stroke);
