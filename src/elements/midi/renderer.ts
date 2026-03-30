@@ -40,6 +40,12 @@ let seenThisFrame = new Set<string>();
 let audioContext: AudioContext | null = null;
 let masterGainNode: GainNode | null = null;
 
+function applyHeaderMetaTextStyle(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = '#475569';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 17px "Caveat", cursive';
+}
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (audioContext) return audioContext;
@@ -179,12 +185,10 @@ export function render(
   );
   ctx.shadowBlur = 0;
 
-  ctx.fillStyle = '#64748b';
+  applyHeaderMetaTextStyle(ctx);
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.font = '16px "Caveat", cursive';
   ctx.fillText(
-    `${normalized.steps} steps · ${normalized.lanes.length} lane${normalized.lanes.length === 1 ? '' : 's'}`,
+    `${normalized.steps} Steps · ${normalized.lanes.length} Lane${normalized.lanes.length === 1 ? '' : 's'}`,
     layout.headerTextBounds.left,
     (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
   );
@@ -279,10 +283,8 @@ function renderTempoDisplay(
   tempo: number
 ): void {
   ctx.save();
-  ctx.fillStyle = '#475569';
+  applyHeaderMetaTextStyle(ctx);
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = 'bold 15px "Caveat", cursive';
   ctx.fillText(`${tempo} BPM`, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
   ctx.restore();
 }
@@ -403,7 +405,7 @@ function renderLane(
   ctx.fillStyle = '#2f3b52';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.font = '16px "Caveat", cursive';
+  ctx.font = '500 17px "Caveat", cursive';
   ctx.fillText(
     getInstrumentLabel(lane.instrument),
     labelX,
@@ -412,7 +414,7 @@ function renderLane(
   );
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '12px "Caveat", cursive';
+  ctx.font = '14px "Caveat", cursive';
   ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
 
   ctx.strokeStyle = '#64748b';
@@ -563,10 +565,10 @@ function renderAddLaneButton(
   ctx.stroke();
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Caveat", cursive';
+  ctx.font = '16px "Caveat", cursive';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Add lane', bounds.right + 8, centerY);
+  ctx.fillText('Add Lane', bounds.right + 8, centerY);
   ctx.restore();
 }
 
@@ -668,10 +670,10 @@ function renderOpenExportMenu(
   });
 
   ctx.fillStyle = '#64748b';
-  ctx.font = '12px "Caveat", cursive';
+  ctx.font = '17px "Caveat", cursive';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Audio length (loops)', bounds.left + 8, bounds.top + 16);
+  ctx.fillText('Audio length (num of loops)', bounds.left + 8, bounds.top + 16);
 
   if (layout.exportLoopDecrementBounds && layout.exportLoopDisplayBounds && layout.exportLoopIncrementBounds) {
     renderLoopAdjustButton(ctx, rc, layout.exportLoopDecrementBounds, '-', seed + 530);
@@ -684,7 +686,7 @@ function renderOpenExportMenu(
       sketchButtonIdle(seed + 531)
     );
     ctx.fillStyle = '#2f3b52';
-    ctx.font = 'bold 16px "Caveat", cursive';
+    ctx.font = 'bold 17px "Caveat", cursive';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
@@ -694,6 +696,17 @@ function renderOpenExportMenu(
     );
 
     renderLoopAdjustButton(ctx, rc, layout.exportLoopIncrementBounds, '+', seed + 532);
+  }
+
+  if (layout.exportAutomationToggleBounds) {
+    renderExportAutomationToggle(
+      ctx,
+      rc,
+      layout.exportAutomationToggleBounds,
+      element.automationHasData ?? false,
+      element.selectedExportApplyAutomation ?? true,
+      seed + 545
+    );
   }
 
   if (layout.exportMidiActionBounds) {
@@ -721,6 +734,94 @@ function renderOpenExportMenu(
   ctx.restore();
 }
 
+function renderExportAutomationToggle(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  hasAutomation: boolean,
+  applyAutomation: boolean,
+  seed: number
+): void {
+  const stateLabel = hasAutomation ? (applyAutomation ? ' ON' : 'OFF') : 'No curve';
+  const fillColor = !hasAutomation
+    ? '#eee7da'
+    : applyAutomation
+      ? '#0f766e'
+      : '#d7e1ec';
+  const textColor = !hasAutomation
+    ? '#94a3b8'
+    : applyAutomation
+      ? '#ffffff'
+      : '#2f3b52';
+  const iconCurveColor = hasAutomation ? '#0f766e' : '#64748b';
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  const iconWidth = 28;
+  const iconHeight = 16;
+  const stateInset = 10;
+  const labelInset = 10;
+  const labelIconGap = 12;
+  const stateIconGap = 18;
+
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    hasAutomation ? sketchButtonActive(fillColor, seed) : sketchButtonIdle(seed)
+  );
+
+  ctx.save();
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 17px "Caveat", cursive';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const labelX = bounds.left + labelInset;
+  const label = 'Apply VOL curve';
+  ctx.fillText(
+    label,
+    labelX,
+    centerY
+  );
+
+  ctx.font = 'bold 15px "Caveat", cursive';
+  const stateWidth = ctx.measureText(stateLabel).width;
+  ctx.font = 'bold 17px "Caveat", cursive';
+  const labelWidth = ctx.measureText(label).width;
+  ctx.font = 'bold 15px "Caveat", cursive';
+  const stateX = bounds.right - stateInset;
+  const preferredIconLeft = labelX + labelWidth + labelIconGap;
+  const maxIconLeft = stateX - stateWidth - stateIconGap - iconWidth;
+  const iconLeft = Math.min(preferredIconLeft, maxIconLeft);
+  const iconTop = centerY - iconHeight / 2;
+
+  ctx.shadowBlur = 0;
+  rc.rectangle(iconLeft, iconTop, iconWidth, iconHeight, sketchVolBox(seed + 1));
+
+  ctx.strokeStyle = iconCurveColor;
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(iconLeft + 3, iconTop + iconHeight - 4);
+  ctx.quadraticCurveTo(
+    iconLeft + iconWidth * 0.38,
+    iconTop + iconHeight * 0.25,
+    iconLeft + iconWidth * 0.58,
+    iconTop + iconHeight * 0.58
+  );
+  ctx.quadraticCurveTo(
+    iconLeft + iconWidth * 0.76,
+    iconTop + iconHeight * 0.9,
+    iconLeft + iconWidth - 3,
+    iconTop + 4
+  );
+  ctx.stroke();
+
+  ctx.textAlign = 'right';
+  ctx.fillText(stateLabel, stateX, centerY);
+  ctx.restore();
+}
+
 function renderExportActionButton(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
@@ -738,7 +839,7 @@ function renderExportActionButton(
   );
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px "Caveat", cursive';
+  ctx.font = 'bold 17px "Caveat", cursive';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);

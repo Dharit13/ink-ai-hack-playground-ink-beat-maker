@@ -216,9 +216,13 @@ export function getStepVelocity(
     : lane.stepVelocities[stepIndex];
 }
 
-export function getStepVolume(element: MidiElement, stepIndex: number): number {
+export function getStepVolume(
+  element: MidiElement,
+  stepIndex: number,
+  applyAutomation = true
+): number {
   const normalized = normalizeMidiElement(element);
-  return normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+  return applyAutomation && normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
 }
 
 export function scheduleElementPlayback(
@@ -226,7 +230,8 @@ export function scheduleElementPlayback(
   outputNode: AudioNode,
   element: MidiElement,
   loopCount = 1,
-  startTime = 0
+  startTime = 0,
+  applyAutomation = true
 ): void {
   const normalized = normalizeMidiElement(element);
   const stepDuration = getStepDurationSeconds(normalized);
@@ -236,7 +241,7 @@ export function scheduleElementPlayback(
     const loopOffset = startTime + loopIndex * patternDuration;
     for (let stepIndex = 0; stepIndex < normalized.steps; stepIndex++) {
       const when = loopOffset + stepIndex * stepDuration;
-      const volume = getStepVolume(normalized, stepIndex);
+      const volume = getStepVolume(normalized, stepIndex, applyAutomation);
       for (const lane of normalized.lanes) {
         const velocity = getStepVelocity(normalized, lane, stepIndex);
         if (velocity === 'off') continue;

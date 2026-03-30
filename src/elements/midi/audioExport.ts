@@ -64,7 +64,8 @@ function encodeWavMono(audioBuffer: AudioBuffer): Blob {
 
 export async function exportWavFile(
   element: MidiElement,
-  loopCount = 1
+  loopCount = 1,
+  applyAutomation = true
 ): Promise<void> {
   if (typeof window === 'undefined' || !window.OfflineAudioContext) {
     showToast('WAV export is not supported in this browser.');
@@ -81,7 +82,7 @@ export async function exportWavFile(
   try {
     const context = new window.OfflineAudioContext(1, frameCount, sampleRate);
     const outputNode = createMidiOutputNode(context);
-    scheduleElementPlayback(context, outputNode, normalized, safeLoopCount, 0);
+    scheduleElementPlayback(context, outputNode, normalized, safeLoopCount, 0, applyAutomation);
 
     const rendered = await context.startRendering();
     const wavBlob = encodeWavMono(rendered);

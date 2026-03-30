@@ -32,6 +32,7 @@ export interface MidiLayout {
   exportLoopDecrementBounds?: BoundingBox;
   exportLoopDisplayBounds?: BoundingBox;
   exportLoopIncrementBounds?: BoundingBox;
+  exportAutomationToggleBounds?: BoundingBox;
   exportMidiActionBounds?: BoundingBox;
   exportAudioActionBounds?: BoundingBox;
   addLaneBounds: BoundingBox;
@@ -59,12 +60,14 @@ const AUTOMATION_GAP = 8;
 const AUTOMATION_ZONE_REACH = 220;
 const EXPORT_MENU_TOP_GAP = 8;
 const EXPORT_MENU_SIDE_GAP = 8;
-const EXPORT_MENU_WIDTH = 176;
+const EXPORT_MENU_WIDTH = 228;
 const EXPORT_MENU_PADDING = 8;
 const EXPORT_MENU_HEADER_HEIGHT = 16;
+const EXPORT_LOOP_LABEL_GAP = 6;
 const EXPORT_LOOP_BUTTON_SIZE = 24;
 const EXPORT_LOOP_ROW_HEIGHT = 28;
 const EXPORT_LOOP_ROW_GAP = 10;
+const EXPORT_AUTOMATION_ROW_HEIGHT = 30;
 const EXPORT_LOOP_DISPLAY_WIDTH = 72;
 const EXPORT_ACTION_HEIGHT = 26;
 const EXPORT_ACTION_GAP = 8;
@@ -144,13 +147,15 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   let exportLoopDecrementBounds: BoundingBox | undefined;
   let exportLoopDisplayBounds: BoundingBox | undefined;
   let exportLoopIncrementBounds: BoundingBox | undefined;
+  let exportAutomationToggleBounds: BoundingBox | undefined;
   let exportMidiActionBounds: BoundingBox | undefined;
   let exportAudioActionBounds: BoundingBox | undefined;
 
   if (normalized.exportMenuOpen) {
     const top = downloadButtonBounds.bottom + EXPORT_MENU_TOP_GAP;
-    const loopRowTop = top + EXPORT_MENU_PADDING + EXPORT_MENU_HEADER_HEIGHT;
-    const actionTop = loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
+    const loopRowTop = top + EXPORT_MENU_PADDING + EXPORT_MENU_HEADER_HEIGHT + EXPORT_LOOP_LABEL_GAP;
+    const automationRowTop = loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
+    const actionTop = automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
     const menuHeight = actionTop - top + EXPORT_ACTION_HEIGHT + EXPORT_MENU_PADDING;
     const left = bounds.right + EXPORT_MENU_SIDE_GAP;
 
@@ -186,6 +191,13 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
       top: exportLoopDecrementBounds.top,
       right: exportLoopDisplayBounds.right + EXPORT_ACTION_GAP + EXPORT_LOOP_BUTTON_SIZE,
       bottom: exportLoopDecrementBounds.bottom,
+    };
+
+    exportAutomationToggleBounds = {
+      left: left + EXPORT_MENU_PADDING,
+      top: automationRowTop,
+      right: left + EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING,
+      bottom: automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT,
     };
 
     const actionWidth =
@@ -273,6 +285,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     exportLoopDecrementBounds,
     exportLoopDisplayBounds,
     exportLoopIncrementBounds,
+    exportAutomationToggleBounds,
     exportMidiActionBounds,
     exportAudioActionBounds,
     addLaneBounds,

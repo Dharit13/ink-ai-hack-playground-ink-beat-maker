@@ -47,6 +47,7 @@ type MidiTapTarget =
   | { kind: 'exportMenuSurface' }
   | { kind: 'decrementExportLoopCount' }
   | { kind: 'incrementExportLoopCount' }
+  | { kind: 'toggleExportAutomation' }
   | { kind: 'exportMidi' }
   | { kind: 'exportWav' }
   | { kind: 'closeExportMenu' }
@@ -365,6 +366,21 @@ function selectExportLoopCount(element: MidiElement, loopCount: number): MidiEle
     selectedExportLoopCount: clampExportLoopCount(loopCount),
   };
 }
+
+function toggleExportAutomation(element: MidiElement): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  if (!normalized.automationHasData) {
+    return normalized;
+  }
+
+  return {
+    ...normalized,
+    exportMenuOpen: true,
+    openInstrumentLaneId: null,
+    selectedExportApplyAutomation: !(normalized.selectedExportApplyAutomation ?? true),
+  };
+}
+
 function addLane(element: MidiElement): MidiElement {
   const normalized = normalizeMidiElement(element);
   const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
@@ -469,6 +485,10 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
 
       if (layout.exportLoopIncrementBounds && pointInBounds(center, layout.exportLoopIncrementBounds)) {
         return { kind: 'incrementExportLoopCount' };
+      }
+
+      if (layout.exportAutomationToggleBounds && pointInBounds(center, layout.exportAutomationToggleBounds)) {
+        return { kind: 'toggleExportAutomation' };
       }
 
       if (layout.exportMidiActionBounds && pointInBounds(center, layout.exportMidiActionBounds)) {
@@ -821,8 +841,14 @@ export async function acceptInk(
             consumed: true,
             strokesConsumed: strokes,
           };
+        case 'toggleExportAutomation':
+          return {
+            element: toggleExportAutomation(normalized),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
         case 'exportMidi':
-          exportMidiFile(normalized);
+          exportMidiFile(normalized, normalized.selectedExportApplyAutomation ?? true);
           return {
             element: {
               ...normalized,
@@ -832,7 +858,11 @@ export async function acceptInk(
             strokesConsumed: strokes,
           };
         case 'exportWav':
-          await exportWavFile(normalized, normalized.selectedExportLoopCount);
+          await exportWavFile(
+            normalized,
+            normalized.selectedExportLoopCount,
+            normalized.selectedExportApplyAutomation ?? true
+          );
           return {
             element: {
               ...normalized,

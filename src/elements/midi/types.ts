@@ -44,6 +44,7 @@ export interface MidiElement extends TransformableElement {
   openInstrumentLaneId?: string | null;
   exportMenuOpen?: boolean;
   selectedExportLoopCount?: number;
+  selectedExportApplyAutomation?: boolean;
   // Legacy fields kept optional so older saved notes can still load.
   activeSteps?: boolean[];
   stepVelocities?: StepVelocity[];
@@ -136,6 +137,7 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
       exportMenuOpen: element.exportMenuOpen ?? false,
       selectedExportLoopCount: clampExportLoopCount(element.selectedExportLoopCount),
+      selectedExportApplyAutomation: element.selectedExportApplyAutomation ?? true,
     };
   }
 
@@ -159,6 +161,7 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
     openInstrumentLaneId: null,
     exportMenuOpen: false,
     selectedExportLoopCount: MIDI_EXPORT_MIN_LOOP_COUNT,
+    selectedExportApplyAutomation: true,
   };
 }
 
@@ -245,5 +248,6 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     openInstrumentLaneId: null,
     exportMenuOpen: false,
     selectedExportLoopCount: MIDI_EXPORT_MIN_LOOP_COUNT,
+    selectedExportApplyAutomation: true,
   };
 }

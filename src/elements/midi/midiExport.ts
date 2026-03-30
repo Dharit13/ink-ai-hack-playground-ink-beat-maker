@@ -50,7 +50,8 @@ function writeUint16BE(value: number): number[] {
 function buildLaneTrackEvents(
   element: MidiElement,
   lane: MidiLane,
-  isFirstTrack: boolean
+  isFirstTrack: boolean,
+  applyAutomation: boolean
 ): number[] {
   const events: number[] = [];
 
@@ -85,7 +86,7 @@ function buildLaneTrackEvents(
     }
 
     // Scale by automation volume if enabled
-    if (velocityValue > 0 && element.automationEnabled) {
+    if (velocityValue > 0 && applyAutomation && element.automationEnabled) {
       const vol = element.stepVolumes?.[stepIndex] ?? 1.0;
       velocityValue = Math.max(1, Math.round(velocityValue * vol));
     }
@@ -107,9 +108,9 @@ function buildLaneTrackEvents(
   return events;
 }
 
-function buildMidiFile(element: MidiElement): Uint8Array {
+function buildMidiFile(element: MidiElement, applyAutomation = true): Uint8Array {
   const trackChunks: number[][] = element.lanes.map((lane, i) => {
-    const events = buildLaneTrackEvents(element, lane, i === 0);
+    const events = buildLaneTrackEvents(element, lane, i === 0, applyAutomation);
     return [
       0x4d, 0x54, 0x72, 0x6b, // MTrk
       ...writeUint32BE(events.length),
@@ -129,8 +130,8 @@ function buildMidiFile(element: MidiElement): Uint8Array {
   return new Uint8Array([...header, ...trackChunks.flat()]);
 }
 
-export function exportMidiFile(element: MidiElement): void {
-  const bytes = buildMidiFile(element);
+export function exportMidiFile(element: MidiElement, applyAutomation = true): void {
+  const bytes = buildMidiFile(element, applyAutomation);
   const blob = new Blob([bytes], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
 
