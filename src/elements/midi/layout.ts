@@ -58,8 +58,7 @@ export const MIDI_CONTROL_TAP_PADDING = 6;
 export const MIDI_STEP_GRID_TAP_PADDING = 4;
 const AUTOMATION_GAP = 8;
 const AUTOMATION_ZONE_REACH = 220;
-const EXPORT_MENU_TOP_GAP = 8;
-const EXPORT_MENU_SIDE_GAP = 8;
+const EXPORT_MENU_TOP_GAP = 4;
 const EXPORT_MENU_WIDTH = 228;
 const EXPORT_MENU_PADDING = 8;
 const EXPORT_MENU_HEADER_HEIGHT = 16;
@@ -157,7 +156,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     const automationRowTop = loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
     const actionTop = automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
     const menuHeight = actionTop - top + EXPORT_ACTION_HEIGHT + EXPORT_MENU_PADDING;
-    const left = bounds.right + EXPORT_MENU_SIDE_GAP;
+    const left = downloadButtonBounds.left;
 
     exportMenuBounds = {
       left,
