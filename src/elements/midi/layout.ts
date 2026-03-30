@@ -28,6 +28,12 @@ export interface MidiLayout {
   tempoDisplayBounds: BoundingBox;
   tapTempoButtonBounds: BoundingBox;
   downloadButtonBounds: BoundingBox;
+  exportMenuBounds?: BoundingBox;
+  exportLoopDecrementBounds?: BoundingBox;
+  exportLoopDisplayBounds?: BoundingBox;
+  exportLoopIncrementBounds?: BoundingBox;
+  exportMidiActionBounds?: BoundingBox;
+  exportAudioActionBounds?: BoundingBox;
   addLaneBounds: BoundingBox;
   lanes: MidiLaneLayout[];
   headerHeight: number;
@@ -51,6 +57,17 @@ export const MIDI_CONTROL_TAP_PADDING = 6;
 export const MIDI_STEP_GRID_TAP_PADDING = 4;
 const AUTOMATION_GAP = 8;
 const AUTOMATION_ZONE_REACH = 220;
+const EXPORT_MENU_TOP_GAP = 8;
+const EXPORT_MENU_SIDE_GAP = 8;
+const EXPORT_MENU_WIDTH = 176;
+const EXPORT_MENU_PADDING = 8;
+const EXPORT_MENU_HEADER_HEIGHT = 16;
+const EXPORT_LOOP_BUTTON_SIZE = 24;
+const EXPORT_LOOP_ROW_HEIGHT = 28;
+const EXPORT_LOOP_ROW_GAP = 10;
+const EXPORT_LOOP_DISPLAY_WIDTH = 72;
+const EXPORT_ACTION_HEIGHT = 26;
+const EXPORT_ACTION_GAP = 8;
 
 export function getMidiBounds(element: MidiElement): BoundingBox {
   const normalized = normalizeMidiElement(element);
@@ -123,6 +140,70 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: playButtonBounds.bottom,
   };
 
+  let exportMenuBounds: BoundingBox | undefined;
+  let exportLoopDecrementBounds: BoundingBox | undefined;
+  let exportLoopDisplayBounds: BoundingBox | undefined;
+  let exportLoopIncrementBounds: BoundingBox | undefined;
+  let exportMidiActionBounds: BoundingBox | undefined;
+  let exportAudioActionBounds: BoundingBox | undefined;
+
+  if (normalized.exportMenuOpen) {
+    const top = downloadButtonBounds.bottom + EXPORT_MENU_TOP_GAP;
+    const loopRowTop = top + EXPORT_MENU_PADDING + EXPORT_MENU_HEADER_HEIGHT;
+    const actionTop = loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
+    const menuHeight = actionTop - top + EXPORT_ACTION_HEIGHT + EXPORT_MENU_PADDING;
+    const left = bounds.right + EXPORT_MENU_SIDE_GAP;
+
+    exportMenuBounds = {
+      left,
+      top,
+      right: left + EXPORT_MENU_WIDTH,
+      bottom: top + menuHeight,
+    };
+
+    const loopControlsWidth = EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING * 2;
+    const loopDisplayWidth = Math.min(
+      EXPORT_LOOP_DISPLAY_WIDTH,
+      loopControlsWidth - EXPORT_LOOP_BUTTON_SIZE * 2 - EXPORT_ACTION_GAP * 2
+    );
+    const loopRowLeft = left + EXPORT_MENU_PADDING + (loopControlsWidth - (
+      EXPORT_LOOP_BUTTON_SIZE * 2 + loopDisplayWidth + EXPORT_ACTION_GAP * 2
+    )) / 2;
+    exportLoopDecrementBounds = {
+      left: loopRowLeft,
+      top: loopRowTop + (EXPORT_LOOP_ROW_HEIGHT - EXPORT_LOOP_BUTTON_SIZE) / 2,
+      right: loopRowLeft + EXPORT_LOOP_BUTTON_SIZE,
+      bottom: loopRowTop + (EXPORT_LOOP_ROW_HEIGHT - EXPORT_LOOP_BUTTON_SIZE) / 2 + EXPORT_LOOP_BUTTON_SIZE,
+    };
+    exportLoopDisplayBounds = {
+      left: exportLoopDecrementBounds.right + EXPORT_ACTION_GAP,
+      top: loopRowTop,
+      right: exportLoopDecrementBounds.right + EXPORT_ACTION_GAP + loopDisplayWidth,
+      bottom: loopRowTop + EXPORT_LOOP_ROW_HEIGHT,
+    };
+    exportLoopIncrementBounds = {
+      left: exportLoopDisplayBounds.right + EXPORT_ACTION_GAP,
+      top: exportLoopDecrementBounds.top,
+      right: exportLoopDisplayBounds.right + EXPORT_ACTION_GAP + EXPORT_LOOP_BUTTON_SIZE,
+      bottom: exportLoopDecrementBounds.bottom,
+    };
+
+    const actionWidth =
+      (EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING * 2 - EXPORT_ACTION_GAP) / 2;
+    exportMidiActionBounds = {
+      left: left + EXPORT_MENU_PADDING,
+      top: actionTop,
+      right: left + EXPORT_MENU_PADDING + actionWidth,
+      bottom: actionTop + EXPORT_ACTION_HEIGHT,
+    };
+    exportAudioActionBounds = {
+      left: exportMidiActionBounds.right + EXPORT_ACTION_GAP,
+      top: actionTop,
+      right: exportMidiActionBounds.right + EXPORT_ACTION_GAP + actionWidth,
+      bottom: actionTop + EXPORT_ACTION_HEIGHT,
+    };
+  }
+
   for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
     const laneTop = bodyTop + laneIndex * (MIDI_LANE_HEIGHT + MIDI_LANE_GAP);
     const instrumentBounds: BoundingBox = {
@@ -188,6 +269,12 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     tempoDisplayBounds,
     tapTempoButtonBounds,
     downloadButtonBounds,
+    exportMenuBounds,
+    exportLoopDecrementBounds,
+    exportLoopDisplayBounds,
+    exportLoopIncrementBounds,
+    exportMidiActionBounds,
+    exportAudioActionBounds,
     addLaneBounds,
     lanes,
     headerHeight,
@@ -273,6 +360,10 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
     if (openLane) {
       controlBounds.push(getMidiPaddedControlBounds(openLane.instrumentMenuBounds));
     }
+  }
+
+  if (layout.exportMenuBounds) {
+    controlBounds.push(getMidiPaddedControlBounds(layout.exportMenuBounds));
   }
 
   if (layout.automationLaneBounds) {

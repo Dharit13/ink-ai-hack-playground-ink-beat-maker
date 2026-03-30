@@ -42,6 +42,8 @@ export interface MidiElement extends TransformableElement {
   automationUPaths?: Array<Array<{ x: number; y: number }>>;
   automationCurvePaths?: Array<Array<{ x: number; y: number }>>;
   openInstrumentLaneId?: string | null;
+  exportMenuOpen?: boolean;
+  selectedExportLoopCount?: number;
   // Legacy fields kept optional so older saved notes can still load.
   activeSteps?: boolean[];
   stepVelocities?: StepVelocity[];
@@ -60,6 +62,8 @@ export const MIDI_LANE_GAP = 6;
 export const MIDI_BODY_TOP_OFFSET = 12;
 export const MIDI_FOOTER_GAP = 8;
 export const MIDI_BOTTOM_PADDING = 10;
+export const MIDI_EXPORT_MIN_LOOP_COUNT = 1;
+export const MIDI_EXPORT_MAX_LOOP_COUNT = 8;
 export const MIDI_LANE_INSTRUMENTS: MidiInstrument[] = [
   'snare',
   'closedHat',
@@ -130,6 +134,8 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
       automationHasData: getAutomationHasData(element),
       stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
+      exportMenuOpen: element.exportMenuOpen ?? false,
+      selectedExportLoopCount: clampExportLoopCount(element.selectedExportLoopCount),
     };
   }
 
@@ -151,6 +157,8 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
     automationHasData: getAutomationHasData(element),
     stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
+    selectedExportLoopCount: MIDI_EXPORT_MIN_LOOP_COUNT,
   };
 }
 
@@ -172,6 +180,17 @@ function ensureVelocityLength(
 
 function ensureVolumeLength(stepVolumes: number[], steps: number): number[] {
   return Array.from({ length: steps }, (_, index) => stepVolumes[index] ?? 1.0);
+}
+
+export function clampExportLoopCount(loopCount: number | undefined): number {
+  if (typeof loopCount !== 'number' || !Number.isFinite(loopCount)) {
+    return MIDI_EXPORT_MIN_LOOP_COUNT;
+  }
+
+  return Math.max(
+    MIDI_EXPORT_MIN_LOOP_COUNT,
+    Math.min(MIDI_EXPORT_MAX_LOOP_COUNT, Math.round(loopCount))
+  );
 }
 
 function getAutomationHeight(element: MidiElement): number | undefined {
@@ -224,5 +243,7 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     automationEnabled: false,
     stepVolumes: Array.from({ length: DEFAULT_MIDI_STEPS }, () => 1.0),
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
+    selectedExportLoopCount: MIDI_EXPORT_MIN_LOOP_COUNT,
   };
 }

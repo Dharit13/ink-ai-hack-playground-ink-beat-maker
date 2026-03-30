@@ -20,8 +20,13 @@ import {
   type MidiElement,
   type MidiInputMode,
   type MidiInstrument,
-  type StepVelocity,
 } from './types';
+import {
+  createMidiOutputNode,
+  getStepDurationSeconds,
+  getStepVelocity,
+  scheduleLaneSoundAtTime,
+} from './audio';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -34,16 +39,6 @@ let seenThisFrame = new Set<string>();
 
 let audioContext: AudioContext | null = null;
 let masterGainNode: GainNode | null = null;
-let compressorNode: DynamicsCompressorNode | null = null;
-let noiseBuffer: AudioBuffer | null = null;
-
-const MASTER_OUTPUT_GAIN = 1.9;
-const VELOCITY_GAIN: Record<StepVelocity, number> = {
-  off: 0,
-  low: 0.12,
-  normal: 0.24,
-  high: 0.4,
-};
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
@@ -54,38 +49,11 @@ function getAudioContext(): AudioContext | null {
 }
 
 function getOutputNode(context: AudioContext): AudioNode {
-  if (!compressorNode) {
-    compressorNode = context.createDynamicsCompressor();
-    compressorNode.threshold.setValueAtTime(-18, context.currentTime);
-    compressorNode.knee.setValueAtTime(12, context.currentTime);
-    compressorNode.ratio.setValueAtTime(3, context.currentTime);
-    compressorNode.attack.setValueAtTime(0.003, context.currentTime);
-    compressorNode.release.setValueAtTime(0.12, context.currentTime);
-  }
-
   if (!masterGainNode) {
-    masterGainNode = context.createGain();
-    masterGainNode.gain.setValueAtTime(MASTER_OUTPUT_GAIN, context.currentTime);
+    masterGainNode = createMidiOutputNode(context);
   }
-
-  masterGainNode.disconnect();
-  compressorNode.disconnect();
-  masterGainNode.connect(compressorNode);
-  compressorNode.connect(context.destination);
 
   return masterGainNode;
-}
-
-function getNoiseBuffer(context: AudioContext): AudioBuffer {
-  if (noiseBuffer) return noiseBuffer;
-
-  const bufferSize = context.sampleRate;
-  noiseBuffer = context.createBuffer(1, bufferSize, context.sampleRate);
-  const channelData = noiseBuffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    channelData[i] = Math.random() * 2 - 1;
-  }
-  return noiseBuffer;
 }
 
 export async function primeMidiAudio(): Promise<void> {
@@ -96,145 +64,22 @@ export async function primeMidiAudio(): Promise<void> {
   }
 }
 
-function getInstrumentSoundProfile(instrument: MidiInstrument): {
-  frequency: number;
-  endFrequency: number;
-  filterFrequency: number;
-  duration: number;
-  type: OscillatorType;
-} {
-  switch (instrument) {
-    case 'kick':
-      return { frequency: 120, endFrequency: 48, filterFrequency: 240, duration: 0.18, type: 'sine' };
-    case 'snare':
-      return { frequency: 220, endFrequency: 130, filterFrequency: 1800, duration: 0.12, type: 'triangle' };
-    case 'closedHat':
-      return { frequency: 520, endFrequency: 440, filterFrequency: 5000, duration: 0.05, type: 'square' };
-    case 'openHat':
-      return { frequency: 540, endFrequency: 420, filterFrequency: 4200, duration: 0.12, type: 'square' };
-    case 'tom':
-      return { frequency: 170, endFrequency: 98, filterFrequency: 700, duration: 0.16, type: 'triangle' };
-    case 'midTom':
-      return { frequency: 145, endFrequency: 85, filterFrequency: 600, duration: 0.16, type: 'triangle' };
-    case 'crash':
-      return { frequency: 460, endFrequency: 330, filterFrequency: 3200, duration: 0.2, type: 'sawtooth' };
-  }
-}
-
-function playNoiseInstrument(
-  context: AudioContext,
-  instrument: MidiInstrument,
-  effectiveGain: number
-): void {
-  const noise = context.createBufferSource();
-  noise.buffer = getNoiseBuffer(context);
-
-  const noiseFilter = context.createBiquadFilter();
-  const noiseGain = context.createGain();
-  const outputNode = getOutputNode(context);
-  const now = context.currentTime;
-
-  noiseFilter.type = instrument === 'snare' ? 'highpass' : 'bandpass';
-
-  switch (instrument) {
-    case 'snare':
-      noiseFilter.frequency.setValueAtTime(1800, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.6 * effectiveGain, now + 0.003);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-      break;
-    case 'closedHat':
-      noiseFilter.frequency.setValueAtTime(7000, now);
-      noiseFilter.Q.setValueAtTime(2.5, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.34 * effectiveGain, now + 0.002);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
-      break;
-    case 'openHat':
-      noiseFilter.frequency.setValueAtTime(5200, now);
-      noiseFilter.Q.setValueAtTime(1.6, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.28 * effectiveGain, now + 0.002);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
-      break;
-    case 'crash':
-      noiseFilter.frequency.setValueAtTime(3600, now);
-      noiseFilter.Q.setValueAtTime(1.1, now);
-      noiseGain.gain.setValueAtTime(0.0001, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.32 * effectiveGain, now + 0.003);
-      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
-      break;
-  }
-
-  noise.connect(noiseFilter);
-  noiseFilter.connect(noiseGain);
-  noiseGain.connect(outputNode);
-  noise.start(now);
-  noise.stop(now + 0.3);
-
-  if (instrument === 'snare') {
-    const snapOsc = context.createOscillator();
-    const snapGain = context.createGain();
-    snapOsc.type = 'triangle';
-    snapOsc.frequency.setValueAtTime(180, now);
-    snapOsc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
-    snapGain.gain.setValueAtTime(0.0001, now);
-    snapGain.gain.exponentialRampToValueAtTime(0.22 * effectiveGain, now + 0.002);
-    snapGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-    snapOsc.connect(snapGain);
-    snapGain.connect(outputNode);
-    snapOsc.start(now);
-    snapOsc.stop(now + 0.1);
-  }
-}
-
-function playLaneSound(instrument: MidiInstrument, velocity: StepVelocity, volume = 1): void {
+function playLaneSound(instrument: MidiInstrument, velocity: ReturnType<typeof getStepVelocity>, volume = 1): void {
   const context = getAudioContext();
   if (!context || context.state !== 'running') return;
-
-  const velocityGain = VELOCITY_GAIN[velocity];
-  if (velocityGain <= 0) return;
-  const effectiveGain = velocityGain * volume;
-
-  if (
-    instrument === 'snare' ||
-    instrument === 'closedHat' ||
-    instrument === 'openHat' ||
-    instrument === 'crash'
-  ) {
-    playNoiseInstrument(context, instrument, effectiveGain);
-    return;
-  }
-
-  const profile = getInstrumentSoundProfile(instrument);
-  const now = context.currentTime;
-  const oscillator = context.createOscillator();
-  const gainNode = context.createGain();
-  const filter = context.createBiquadFilter();
   const outputNode = getOutputNode(context);
-
-  oscillator.type = profile.type;
-  oscillator.frequency.setValueAtTime(profile.frequency, now);
-  oscillator.frequency.exponentialRampToValueAtTime(profile.endFrequency, now + profile.duration * 0.75);
-
-  filter.type = 'bandpass';
-  filter.frequency.setValueAtTime(profile.filterFrequency, now);
-  filter.Q.setValueAtTime(0.8, now);
-
-  gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(effectiveGain, now + 0.005);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + profile.duration);
-
-  oscillator.connect(filter);
-  filter.connect(gainNode);
-  gainNode.connect(outputNode);
-
-  oscillator.start(now);
-  oscillator.stop(now + profile.duration + 0.02);
+  scheduleLaneSoundAtTime(
+    context,
+    outputNode,
+    instrument,
+    velocity,
+    context.currentTime,
+    volume
+  );
 }
 
 function getStepDurationMs(element: MidiElement): number {
-  return 60000 / normalizeMidiElement(element).tempo / 4;
+  return getStepDurationSeconds(element) * 1000;
 }
 
 function getCurrentStepIndex(element: MidiElement, now: number): number {
@@ -262,14 +107,7 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   if (stepIndex !== runtime.lastTriggeredStep) {
     runtime.lastTriggeredStep = stepIndex;
     for (const lane of normalized.lanes) {
-      const velocity =
-        normalized.inputMode === 'tick'
-          ? lane.stepVelocities[stepIndex]
-          : lane.activeSteps[stepIndex]
-            ? lane.stepVelocities[stepIndex] === 'off'
-              ? 'normal'
-              : lane.stepVelocities[stepIndex]
-            : 'off';
+      const velocity = getStepVelocity(normalized, lane, stepIndex);
       if (velocity !== 'off') {
         const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
         playLaneSound(lane.instrument, velocity, volume);
@@ -355,7 +193,7 @@ export function render(
   renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
   renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
   renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed);
-  renderDownloadButton(ctx, rc, layout.downloadButtonBounds, seed);
+  renderDownloadButton(ctx, rc, layout.downloadButtonBounds, normalized.exportMenuOpen, seed);
 
   for (const laneLayout of layout.lanes) {
     renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
@@ -363,6 +201,7 @@ export function render(
 
   renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed);
   renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
+  renderOpenExportMenu(ctx, rc, normalized, layout, seed);
 
   if (normalized.automationEnabled && layout.automationLaneBounds) {
     renderAutomationLane(ctx, rc, normalized, layout, seed);
@@ -475,6 +314,7 @@ function renderDownloadButton(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
+  isOpen: boolean,
   seed: number
 ): void {
   ctx.save();
@@ -483,7 +323,7 @@ function renderDownloadButton(
     bounds.top,
     bounds.right - bounds.left,
     bounds.bottom - bounds.top,
-    sketchButtonIdle(seed + 4)
+    isOpen ? sketchButtonActive('#d7ebe4', seed + 4) : sketchButtonActive('#f3ecdf', seed + 4)
   );
 
   const centerX = (bounds.left + bounds.right) / 2;
@@ -491,8 +331,8 @@ function renderDownloadButton(
   const iconTop = bounds.top + 6;
   const iconBottom = bounds.bottom - 7;
 
-  ctx.strokeStyle = '#2f3b52';
-  ctx.fillStyle = '#2f3b52';
+  ctx.strokeStyle = isOpen ? '#1f5d56' : '#2f3b52';
+  ctx.fillStyle = isOpen ? '#1f5d56' : '#2f3b52';
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -804,6 +644,126 @@ function renderOpenInstrumentMenu(
     ctx.fillText(getInstrumentLabel(instrument), bounds.left + 20, rowTop + 11);
   });
   ctx.restore();
+}
+
+function renderOpenExportMenu(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  element: MidiElement,
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
+): void {
+  if (!element.exportMenuOpen || !layout.exportMenuBounds) return;
+
+  ctx.save();
+  const bounds = layout.exportMenuBounds;
+  rc.rectangle(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, {
+    roughness: 1.0,
+    bowing: 0.7,
+    stroke: '#2f3b52',
+    strokeWidth: 1.4,
+    fill: '#fffaf0',
+    fillStyle: 'solid',
+    seed: seed + 520,
+  });
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px "Caveat", cursive';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Audio length (loops)', bounds.left + 8, bounds.top + 16);
+
+  if (layout.exportLoopDecrementBounds && layout.exportLoopDisplayBounds && layout.exportLoopIncrementBounds) {
+    renderLoopAdjustButton(ctx, rc, layout.exportLoopDecrementBounds, '-', seed + 530);
+
+    rc.rectangle(
+      layout.exportLoopDisplayBounds.left,
+      layout.exportLoopDisplayBounds.top,
+      layout.exportLoopDisplayBounds.right - layout.exportLoopDisplayBounds.left,
+      layout.exportLoopDisplayBounds.bottom - layout.exportLoopDisplayBounds.top,
+      sketchButtonIdle(seed + 531)
+    );
+    ctx.fillStyle = '#2f3b52';
+    ctx.font = 'bold 16px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      `${element.selectedExportLoopCount ?? 1}x`,
+      (layout.exportLoopDisplayBounds.left + layout.exportLoopDisplayBounds.right) / 2,
+      (layout.exportLoopDisplayBounds.top + layout.exportLoopDisplayBounds.bottom) / 2 - 1
+    );
+
+    renderLoopAdjustButton(ctx, rc, layout.exportLoopIncrementBounds, '+', seed + 532);
+  }
+
+  if (layout.exportMidiActionBounds) {
+    renderExportActionButton(
+      ctx,
+      rc,
+      layout.exportMidiActionBounds,
+      'MIDI (.mid)',
+      '#475569',
+      seed + 560
+    );
+  }
+
+  if (layout.exportAudioActionBounds) {
+    renderExportActionButton(
+      ctx,
+      rc,
+      layout.exportAudioActionBounds,
+      'Audio (.wav)',
+      '#0f766e',
+      seed + 561
+    );
+  }
+
+  ctx.restore();
+}
+
+function renderExportActionButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  label: string,
+  color: string,
+  seed: number
+): void {
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonActive(color, seed)
+  );
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 14px "Caveat", cursive';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+}
+
+function renderLoopAdjustButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  label: string,
+  seed: number
+): void {
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed)
+  );
+
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 18px "Caveat", cursive';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
 }
 
 function renderAutomationCurve(

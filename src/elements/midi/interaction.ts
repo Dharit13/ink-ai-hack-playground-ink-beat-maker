@@ -16,6 +16,7 @@ import {
 import { primeMidiAudio } from './renderer';
 import { exportMidiFile } from './midiExport';
 import {
+  clampExportLoopCount,
   createMidiLane,
   getMidiHeightForLaneCount,
   MIDI_AUTOMATION_MIN_HEIGHT,
@@ -23,6 +24,7 @@ import {
   MIDI_MIN_HEIGHT,
   normalizeMidiElement,
 } from './types';
+import { exportWavFile } from './audioExport';
 
 const TAP_DISTANCE_THRESHOLD = 12;
 const MIN_MIDI_WIDTH = 320;
@@ -41,7 +43,13 @@ type MidiTapTarget =
   | { kind: 'tapTempo' }
   | { kind: 'play' }
   | { kind: 'toggleMode' }
-  | { kind: 'download' }
+  | { kind: 'toggleExportMenu' }
+  | { kind: 'exportMenuSurface' }
+  | { kind: 'decrementExportLoopCount' }
+  | { kind: 'incrementExportLoopCount' }
+  | { kind: 'exportMidi' }
+  | { kind: 'exportWav' }
+  | { kind: 'closeExportMenu' }
   | { kind: 'addLane' }
   | { kind: 'removeLane'; laneIndex: number }
   | { kind: 'selectInstrument'; laneIndex: number; clampedCenter: Offset }
@@ -268,6 +276,8 @@ function togglePlayState(element: MidiElement): MidiElement {
   return {
     ...element,
     isLooping: !element.isLooping,
+    openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
 
@@ -314,6 +324,7 @@ function toggleMode(element: MidiElement): MidiElement {
     lanes,
     inputMode: nextMode,
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
 
@@ -323,9 +334,37 @@ function toggleInstrumentMenu(element: MidiElement, laneIndex: number): MidiElem
   return {
     ...normalized,
     openInstrumentLaneId: normalized.openInstrumentLaneId === laneId ? null : laneId,
+    exportMenuOpen: false,
   };
 }
 
+function toggleExportMenu(element: MidiElement): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    openInstrumentLaneId: null,
+    exportMenuOpen: !normalized.exportMenuOpen,
+  };
+}
+
+function openExportMenu(element: MidiElement): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    openInstrumentLaneId: null,
+    exportMenuOpen: true,
+  };
+}
+
+function selectExportLoopCount(element: MidiElement, loopCount: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    exportMenuOpen: true,
+    openInstrumentLaneId: null,
+    selectedExportLoopCount: clampExportLoopCount(loopCount),
+  };
+}
 function addLane(element: MidiElement): MidiElement {
   const normalized = normalizeMidiElement(element);
   const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
@@ -337,6 +376,7 @@ function addLane(element: MidiElement): MidiElement {
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
 
@@ -352,6 +392,7 @@ function removeLane(element: MidiElement, laneIndex: number): MidiElement {
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
 
@@ -377,6 +418,7 @@ function selectInstrumentFromMenu(
     ...normalized,
     lanes,
     openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
 
@@ -415,6 +457,34 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
   const normalized = normalizeMidiElement(element);
   const layout = getMidiLayout(normalized);
 
+  if (normalized.exportMenuOpen && layout.exportMenuBounds) {
+    if (pointInControlBounds(center, layout.downloadButtonBounds)) {
+      return { kind: 'toggleExportMenu' };
+    }
+
+    if (pointInControlBounds(center, layout.exportMenuBounds)) {
+      if (layout.exportLoopDecrementBounds && pointInBounds(center, layout.exportLoopDecrementBounds)) {
+        return { kind: 'decrementExportLoopCount' };
+      }
+
+      if (layout.exportLoopIncrementBounds && pointInBounds(center, layout.exportLoopIncrementBounds)) {
+        return { kind: 'incrementExportLoopCount' };
+      }
+
+      if (layout.exportMidiActionBounds && pointInBounds(center, layout.exportMidiActionBounds)) {
+        return { kind: 'exportMidi' };
+      }
+
+      if (layout.exportAudioActionBounds && pointInBounds(center, layout.exportAudioActionBounds)) {
+        return { kind: 'exportWav' };
+      }
+
+      return { kind: 'exportMenuSurface' };
+    }
+
+    return { kind: 'closeExportMenu' };
+  }
+
   if (pointInControlBounds(center, layout.tapTempoButtonBounds)) {
     return { kind: 'tapTempo' };
   }
@@ -428,7 +498,7 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
   }
 
   if (pointInControlBounds(center, layout.downloadButtonBounds)) {
-    return { kind: 'download' };
+    return { kind: 'toggleExportMenu' };
   }
 
   if (pointInControlBounds(center, layout.addLaneBounds)) {
@@ -629,6 +699,14 @@ export function isInterestedIn(
   strokeBounds: BoundingBox
 ): boolean {
   const normalized = normalizeMidiElement(element);
+  if (normalized.exportMenuOpen) {
+    debugLog.info('[MIDI] isInterestedIn', {
+      result: true,
+      exportMenuOpen: true,
+    });
+    return true;
+  }
+
   const downloadZone = getDownloadZoneBounds(element);
   const interactionBounds = getMidiInteractionBounds(normalized);
   const automationBounds = getAutomationZoneBounds(normalized);
@@ -641,6 +719,7 @@ export function isInterestedIn(
     inInteraction,
     inAutomation,
     inDownload,
+    exportMenuOpen: false,
   });
   return result;
 }
@@ -712,10 +791,62 @@ export async function acceptInk(
             consumed: true,
             strokesConsumed: strokes,
           };
-        case 'download':
-          exportMidiFile(normalized);
+        case 'toggleExportMenu':
+          return {
+            element: toggleExportMenu(normalized),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'exportMenuSurface':
           return {
             element: normalized,
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'decrementExportLoopCount':
+          return {
+            element: selectExportLoopCount(
+              normalized,
+              (normalized.selectedExportLoopCount ?? 1) - 1
+            ),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'incrementExportLoopCount':
+          return {
+            element: selectExportLoopCount(
+              normalized,
+              (normalized.selectedExportLoopCount ?? 1) + 1
+            ),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'exportMidi':
+          exportMidiFile(normalized);
+          return {
+            element: {
+              ...normalized,
+              exportMenuOpen: false,
+            },
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'exportWav':
+          await exportWavFile(normalized, normalized.selectedExportLoopCount);
+          return {
+            element: {
+              ...normalized,
+              exportMenuOpen: false,
+            },
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'closeExportMenu':
+          return {
+            element: {
+              ...normalized,
+              exportMenuOpen: false,
+            },
             consumed: true,
             strokesConsumed: strokes,
           };
@@ -757,6 +888,7 @@ export async function acceptInk(
             element: {
               ...normalized,
               openInstrumentLaneId: null,
+              exportMenuOpen: false,
             },
             consumed: true,
             strokesConsumed: strokes,
@@ -788,6 +920,7 @@ export async function acceptInk(
               ...normalized,
               lanes,
               openInstrumentLaneId: null,
+              exportMenuOpen: false,
             },
             consumed: true,
             strokesConsumed: strokes,
@@ -817,6 +950,7 @@ export async function acceptInk(
           automationUPaths: undefined,
           automationCurvePaths,
           openInstrumentLaneId: null,
+          exportMenuOpen: false,
         },
         consumed: true,
         strokesConsumed: strokesInLane,
@@ -860,6 +994,7 @@ export async function acceptInk(
           automationUPaths: undefined,
           automationCurvePaths: undefined,
           openInstrumentLaneId: null,
+          exportMenuOpen: false,
         },
         consumed: true,
         strokesConsumed: strokesInZone,
@@ -887,9 +1022,12 @@ export async function acceptInk(
     const isDownload = isDownloadGesture(recog);
     debugLog.info('[MIDI] Download gesture check', { isDownload, rawText: recog?.rawText });
     if (isDownload) {
-      debugLog.info('[MIDI] EXPORTING MIDI FILE');
-      exportMidiFile(element);
-      return { element, consumed: true, strokesConsumed: strokes };
+      debugLog.info('[MIDI] OPENING EXPORT MENU');
+      return {
+        element: openExportMenu(normalized),
+        consumed: true,
+        strokesConsumed: strokes,
+      };
     }
   }
 
@@ -992,6 +1130,7 @@ export async function acceptInk(
       ...normalized,
       lanes,
       openInstrumentLaneId: null,
+      exportMenuOpen: false,
     },
     consumed: true,
     strokesConsumed: strokes,
@@ -1030,5 +1169,7 @@ export function onHandleDrag(
   return {
     ...normalized,
     width: Math.max(MIN_MIDI_WIDTH, point.x - left),
+    openInstrumentLaneId: null,
+    exportMenuOpen: false,
   };
 }
