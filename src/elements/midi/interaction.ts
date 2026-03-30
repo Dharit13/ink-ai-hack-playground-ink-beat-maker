@@ -50,7 +50,6 @@ type MidiTapTarget =
   | { kind: 'toggleExportAutomation' }
   | { kind: 'exportMidi' }
   | { kind: 'exportWav' }
-  | { kind: 'closeExportMenu' }
   | { kind: 'addLane' }
   | { kind: 'removeLane'; laneIndex: number }
   | { kind: 'selectInstrument'; laneIndex: number; clampedCenter: Offset }
@@ -278,7 +277,6 @@ function togglePlayState(element: MidiElement): MidiElement {
     ...element,
     isLooping: !element.isLooping,
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }
 
@@ -325,7 +323,6 @@ function toggleMode(element: MidiElement): MidiElement {
     lanes,
     inputMode: nextMode,
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }
 
@@ -335,7 +332,6 @@ function toggleInstrumentMenu(element: MidiElement, laneIndex: number): MidiElem
   return {
     ...normalized,
     openInstrumentLaneId: normalized.openInstrumentLaneId === laneId ? null : laneId,
-    exportMenuOpen: false,
   };
 }
 
@@ -392,7 +388,6 @@ function addLane(element: MidiElement): MidiElement {
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }
 
@@ -408,7 +403,6 @@ function removeLane(element: MidiElement, laneIndex: number): MidiElement {
     lanes,
     height: nextHeight,
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }
 
@@ -434,7 +428,6 @@ function selectInstrumentFromMenu(
     ...normalized,
     lanes,
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }
 
@@ -501,8 +494,6 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
 
       return { kind: 'exportMenuSurface' };
     }
-
-    return { kind: 'closeExportMenu' };
   }
 
   if (pointInControlBounds(center, layout.tapTempoButtonBounds)) {
@@ -850,10 +841,7 @@ export async function acceptInk(
         case 'exportMidi':
           exportMidiFile(normalized, normalized.selectedExportApplyAutomation ?? true);
           return {
-            element: {
-              ...normalized,
-              exportMenuOpen: false,
-            },
+            element: normalized,
             consumed: true,
             strokesConsumed: strokes,
           };
@@ -864,19 +852,7 @@ export async function acceptInk(
             normalized.selectedExportApplyAutomation ?? true
           );
           return {
-            element: {
-              ...normalized,
-              exportMenuOpen: false,
-            },
-            consumed: true,
-            strokesConsumed: strokes,
-          };
-        case 'closeExportMenu':
-          return {
-            element: {
-              ...normalized,
-              exportMenuOpen: false,
-            },
+            element: normalized,
             consumed: true,
             strokesConsumed: strokes,
           };
@@ -918,7 +894,6 @@ export async function acceptInk(
             element: {
               ...normalized,
               openInstrumentLaneId: null,
-              exportMenuOpen: false,
             },
             consumed: true,
             strokesConsumed: strokes,
@@ -950,7 +925,6 @@ export async function acceptInk(
               ...normalized,
               lanes,
               openInstrumentLaneId: null,
-              exportMenuOpen: false,
             },
             consumed: true,
             strokesConsumed: strokes,
@@ -980,7 +954,6 @@ export async function acceptInk(
           automationUPaths: undefined,
           automationCurvePaths,
           openInstrumentLaneId: null,
-          exportMenuOpen: false,
         },
         consumed: true,
         strokesConsumed: strokesInLane,
@@ -1024,7 +997,6 @@ export async function acceptInk(
           automationUPaths: undefined,
           automationCurvePaths: undefined,
           openInstrumentLaneId: null,
-          exportMenuOpen: false,
         },
         consumed: true,
         strokesConsumed: strokesInZone,
@@ -1160,7 +1132,6 @@ export async function acceptInk(
       ...normalized,
       lanes,
       openInstrumentLaneId: null,
-      exportMenuOpen: false,
     },
     consumed: true,
     strokesConsumed: strokes,
@@ -1200,6 +1171,5 @@ export function onHandleDrag(
     ...normalized,
     width: Math.max(MIN_MIDI_WIDTH, point.x - left),
     openInstrumentLaneId: null,
-    exportMenuOpen: false,
   };
 }

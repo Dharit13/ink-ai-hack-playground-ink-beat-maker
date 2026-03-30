@@ -154,8 +154,11 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   if (normalized.exportMenuOpen) {
     const top = downloadButtonBounds.bottom + EXPORT_MENU_TOP_GAP;
     const loopRowTop = top + EXPORT_MENU_PADDING + EXPORT_MENU_HEADER_HEIGHT + EXPORT_LOOP_LABEL_GAP;
+    const hasAutomation = normalized.automationHasData ?? false;
     const automationRowTop = loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
-    const actionTop = automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
+    const actionTop = hasAutomation
+      ? automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP
+      : loopRowTop + EXPORT_LOOP_ROW_HEIGHT + EXPORT_LOOP_ROW_GAP;
     const menuHeight = actionTop - top + EXPORT_ACTION_HEIGHT + EXPORT_MENU_PADDING;
     const left = downloadButtonBounds.left;
 
@@ -193,12 +196,14 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
       bottom: exportLoopDecrementBounds.bottom,
     };
 
-    exportAutomationToggleBounds = {
-      left: left + EXPORT_MENU_PADDING,
-      top: automationRowTop,
-      right: left + EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING,
-      bottom: automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT,
-    };
+    if (hasAutomation) {
+      exportAutomationToggleBounds = {
+        left: left + EXPORT_MENU_PADDING,
+        top: automationRowTop,
+        right: left + EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING,
+        bottom: automationRowTop + EXPORT_AUTOMATION_ROW_HEIGHT,
+      };
+    }
 
     const actionWidth =
       (EXPORT_MENU_WIDTH - EXPORT_MENU_PADDING * 2 - EXPORT_ACTION_GAP) / 2;
