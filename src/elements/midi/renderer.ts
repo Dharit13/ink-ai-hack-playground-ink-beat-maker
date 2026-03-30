@@ -968,7 +968,17 @@ function renderAutomationLane(
 
 function getLaneAccentColor(instrument: MidiInstrument): string {
   const index = MIDI_LANE_INSTRUMENTS.indexOf(instrument);
-  const colors = ['#0f766e', '#0b7285', '#b45309', '#7c3aed', '#1d4ed8', '#be185d', '#c2410c'];
+  const colors = [
+    '#0f766e',
+    '#0b7285',
+    '#b45309',
+    '#7c3aed',
+    '#1d4ed8',
+    '#be185d',
+    '#c2410c',
+    '#dc2626',
+    '#4d7c0f',
+  ];
   return colors[Math.max(0, index) % colors.length];
 }
 

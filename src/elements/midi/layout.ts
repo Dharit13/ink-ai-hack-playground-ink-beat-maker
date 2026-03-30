@@ -7,6 +7,7 @@ import {
   MIDI_HEADER_HEIGHT,
   MIDI_LANE_GAP,
   MIDI_LANE_HEIGHT,
+  MIDI_LANE_INSTRUMENTS,
   normalizeMidiElement,
 } from './types';
 
@@ -240,7 +241,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
       left: instrumentBounds.left,
       top: menuTop,
       right: instrumentBounds.right + 34,
-      bottom: menuTop + MENU_ROW_HEIGHT * 7,
+      bottom: menuTop + MENU_ROW_HEIGHT * MIDI_LANE_INSTRUMENTS.length,
     };
 
     lanes.push({

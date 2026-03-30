@@ -8,7 +8,9 @@ export type MidiInstrument =
   | 'openHat'
   | 'tom'
   | 'midTom'
-  | 'crash';
+  | 'crash'
+  | 'clap'
+  | 'cowbell';
 
 export type MidiInputMode = 'tap' | 'tick';
 export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
@@ -73,6 +75,8 @@ export const MIDI_LANE_INSTRUMENTS: MidiInstrument[] = [
   'tom',
   'midTom',
   'crash',
+  'clap',
+  'cowbell',
 ];
 
 export function getInstrumentLabel(instrument: MidiInstrument): string {
@@ -91,6 +95,10 @@ export function getInstrumentLabel(instrument: MidiInstrument): string {
       return 'Mid Tom';
     case 'crash':
       return 'Crash';
+    case 'clap':
+      return 'Clap';
+    case 'cowbell':
+      return 'Cowbell';
   }
 }
 

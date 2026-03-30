@@ -16,11 +16,13 @@ const PERCUSSION_CHANNEL = 9;
 const GM_NOTE: Record<MidiInstrument, number> = {
   kick: 36,       // Bass Drum 1
   snare: 38,      // Acoustic Snare
+  clap: 39,       // Hand Clap
   closedHat: 42,  // Closed Hi-Hat
   openHat: 46,    // Open Hi-Hat
   tom: 45,        // Low Tom
   midTom: 47,     // Low-Mid Tom
   crash: 49,      // Crash Cymbal 1
+  cowbell: 56,    // Cowbell
 };
 
 function writeVarLen(value: number): number[] {

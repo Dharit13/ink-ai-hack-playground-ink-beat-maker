@@ -66,6 +66,10 @@ function getInstrumentSoundProfile(instrument: MidiInstrument): {
       return { frequency: 145, endFrequency: 85, filterFrequency: 600, duration: 0.16, type: 'triangle' };
     case 'crash':
       return { frequency: 460, endFrequency: 330, filterFrequency: 3200, duration: 0.2, type: 'sawtooth' };
+    case 'clap':
+      return { frequency: 240, endFrequency: 180, filterFrequency: 2200, duration: 0.08, type: 'triangle' };
+    case 'cowbell':
+      return { frequency: 560, endFrequency: 510, filterFrequency: 2100, duration: 0.12, type: 'square' };
   }
 }
 
@@ -112,6 +116,17 @@ function playNoiseInstrument(
       noiseGain.gain.exponentialRampToValueAtTime(0.32 * effectiveGain, when + 0.003);
       noiseGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.28);
       break;
+    case 'clap':
+      noiseFilter.frequency.setValueAtTime(2100, when);
+      noiseFilter.Q.setValueAtTime(0.9, when);
+      noiseGain.gain.setValueAtTime(0.0001, when);
+      noiseGain.gain.exponentialRampToValueAtTime(0.34 * effectiveGain, when + 0.0015);
+      noiseGain.gain.exponentialRampToValueAtTime(0.12 * effectiveGain, when + 0.008);
+      noiseGain.gain.linearRampToValueAtTime(0.22 * effectiveGain, when + 0.014);
+      noiseGain.gain.exponentialRampToValueAtTime(0.08 * effectiveGain, when + 0.022);
+      noiseGain.gain.linearRampToValueAtTime(0.16 * effectiveGain, when + 0.03);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+      break;
     default:
       return;
   }
@@ -138,6 +153,39 @@ function playNoiseInstrument(
   }
 }
 
+function playCowbellInstrument(
+  context: MidiAudioContext,
+  outputNode: AudioNode,
+  effectiveGain: number,
+  when: number
+): void {
+  const frequencies = [560, 845];
+  const oscillatorTypes: OscillatorType[] = ['square', 'triangle'];
+  const mixGain = context.createGain();
+  const filter = context.createBiquadFilter();
+
+  mixGain.gain.setValueAtTime(0.0001, when);
+  mixGain.gain.exponentialRampToValueAtTime(0.38 * effectiveGain, when + 0.002);
+  mixGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.11);
+
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(2400, when);
+  filter.Q.setValueAtTime(1.8, when);
+
+  mixGain.connect(filter);
+  filter.connect(outputNode);
+
+  frequencies.forEach((frequency, index) => {
+    const oscillator = context.createOscillator();
+    oscillator.type = oscillatorTypes[index];
+    oscillator.frequency.setValueAtTime(frequency, when);
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * 0.96, when + 0.08);
+    oscillator.connect(mixGain);
+    oscillator.start(when);
+    oscillator.stop(when + 0.13);
+  });
+}
+
 export function scheduleLaneSoundAtTime(
   context: MidiAudioContext,
   outputNode: AudioNode,
@@ -152,11 +200,17 @@ export function scheduleLaneSoundAtTime(
 
   if (
     instrument === 'snare' ||
+    instrument === 'clap' ||
     instrument === 'closedHat' ||
     instrument === 'openHat' ||
     instrument === 'crash'
   ) {
     playNoiseInstrument(context, outputNode, instrument, effectiveGain, when);
+    return;
+  }
+
+  if (instrument === 'cowbell') {
+    playCowbellInstrument(context, outputNode, effectiveGain, when);
     return;
   }
 
