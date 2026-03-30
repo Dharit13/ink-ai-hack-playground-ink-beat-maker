@@ -1,7 +1,7 @@
 # Drumink — Ink-Based MIDI Step Sequencer
 Drumink is a MIDI step sequencer that lives directly inside the canvas. Instead of opening a DAW or reaching for an instrument, you sketch rhythms and hear them loop back immediately. The system is designed to capture musical ideas at the speed of thought using the same ink gestures used to create elements in the app.
 ## Demo
-[Live Demo : Try it yourself](https://your-vercel-app-url.vercel.app)
+[Live Demo : Try it yourself](https://ink-ai-hack-playground-ink-beat-mak.vercel.app/)
 ## Demo Video
 [![Watch the demo](https://img.youtube.com/vi/e3lFg2vJ6oo/0.jpg)](https://m.youtube.com/shorts/e3lFg2vJ6oo)
 ## How to Use
