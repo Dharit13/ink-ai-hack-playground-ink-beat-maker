@@ -9,6 +9,8 @@ import {
   getMidiBounds,
   getMidiInteractionBounds,
   getMidiLayout,
+  getMidiPaddedControlBounds,
+  getMidiPaddedStepGridBounds,
   getMidiStepBounds,
 } from './layout';
 import { primeMidiAudio } from './renderer';
@@ -35,6 +37,18 @@ const TAP_TEMPO_MAX_BPM = 240;
 
 const tapTempoHistory = new Map<string, number[]>();
 
+type MidiTapTarget =
+  | { kind: 'tapTempo' }
+  | { kind: 'play' }
+  | { kind: 'toggleMode' }
+  | { kind: 'download' }
+  | { kind: 'addLane' }
+  | { kind: 'removeLane'; laneIndex: number }
+  | { kind: 'selectInstrument'; laneIndex: number; clampedCenter: Offset }
+  | { kind: 'toggleInstrumentMenu'; laneIndex: number }
+  | { kind: 'closeInstrumentMenu' }
+  | { kind: 'stepCell'; laneIndex: number; stepIndex: number };
+
 function boundingBoxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 }
@@ -46,6 +60,10 @@ function pointInBounds(point: Offset, bounds: BoundingBox): boolean {
     point.y >= bounds.top &&
     point.y <= bounds.bottom
   );
+}
+
+function pointInControlBounds(point: Offset, bounds: BoundingBox): boolean {
+  return pointInBounds(point, getMidiPaddedControlBounds(bounds));
 }
 
 function getStrokeBounds(stroke: Stroke): BoundingBox | null {
@@ -177,6 +195,13 @@ function getCoverageRatio(strokes: Stroke[], bounds: BoundingBox): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function clampPointToBounds(point: Offset, bounds: BoundingBox): Offset {
+  return {
+    x: clamp(point.x, bounds.left, bounds.right - Number.EPSILON),
+    y: clamp(point.y, bounds.top, bounds.bottom - Number.EPSILON),
+  };
 }
 
 function applyTapTempo(element: MidiElement, tapTime: number): MidiElement {
@@ -353,6 +378,109 @@ function selectInstrumentFromMenu(
     lanes,
     openInstrumentLaneId: null,
   };
+}
+
+function getStepTargetFromPoint(element: MidiElement, center: Offset): MidiTapTarget | null {
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+
+  for (const laneLayout of layout.lanes) {
+    if (!pointInBounds(center, getMidiPaddedStepGridBounds(laneLayout.gridBounds))) {
+      continue;
+    }
+
+    const gridWidth = laneLayout.gridBounds.right - laneLayout.gridBounds.left;
+    if (gridWidth <= 0) {
+      return null;
+    }
+
+    const clampedX = clamp(center.x, laneLayout.gridBounds.left, laneLayout.gridBounds.right - Number.EPSILON);
+    const stepIndex = clamp(
+      Math.floor(((clampedX - laneLayout.gridBounds.left) / gridWidth) * normalized.steps),
+      0,
+      normalized.steps - 1
+    );
+
+    return {
+      kind: 'stepCell',
+      laneIndex: laneLayout.laneIndex,
+      stepIndex,
+    };
+  }
+
+  return null;
+}
+
+export function resolveMidiTapTarget(element: MidiElement, center: Offset): MidiTapTarget | null {
+  const normalized = normalizeMidiElement(element);
+  const layout = getMidiLayout(normalized);
+
+  if (pointInControlBounds(center, layout.tapTempoButtonBounds)) {
+    return { kind: 'tapTempo' };
+  }
+
+  if (pointInControlBounds(center, layout.playButtonBounds)) {
+    return { kind: 'play' };
+  }
+
+  if (pointInControlBounds(center, layout.toggleModeBounds)) {
+    return { kind: 'toggleMode' };
+  }
+
+  if (pointInControlBounds(center, layout.downloadButtonBounds)) {
+    return { kind: 'download' };
+  }
+
+  if (pointInControlBounds(center, layout.addLaneBounds)) {
+    return { kind: 'addLane' };
+  }
+
+  for (const laneLayout of layout.lanes) {
+    if (pointInControlBounds(center, laneLayout.removeButtonBounds)) {
+      return {
+        kind: 'removeLane',
+        laneIndex: laneLayout.laneIndex,
+      };
+    }
+  }
+
+  if (normalized.openInstrumentLaneId) {
+    const openLaneIndex = normalized.lanes.findIndex(
+      (lane) => lane.id === normalized.openInstrumentLaneId
+    );
+    if (openLaneIndex >= 0) {
+      const openLaneLayout = layout.lanes[openLaneIndex];
+      if (pointInControlBounds(center, openLaneLayout.instrumentMenuBounds)) {
+        return {
+          kind: 'selectInstrument',
+          laneIndex: openLaneIndex,
+          clampedCenter: clampPointToBounds(center, openLaneLayout.instrumentMenuBounds),
+        };
+      }
+
+      if (pointInControlBounds(center, openLaneLayout.instrumentBounds)) {
+        return {
+          kind: 'toggleInstrumentMenu',
+          laneIndex: openLaneIndex,
+        };
+      }
+
+      if (pointInBounds(center, getMidiInteractionBounds(normalized))) {
+        return { kind: 'closeInstrumentMenu' };
+      }
+    }
+  }
+
+  for (const laneLayout of layout.lanes) {
+    if (pointInControlBounds(center, laneLayout.instrumentBounds)) {
+      return {
+        kind: 'toggleInstrumentMenu',
+        laneIndex: laneLayout.laneIndex,
+      };
+    }
+  }
+
+  return getStepTargetFromPoint(normalized, center);
 }
 
 function getStepVolumesFromStrokes(
@@ -558,74 +686,73 @@ export async function acceptInk(
   if (strokes.length === 1) {
     const stroke = strokes[0];
     const center = getStrokeCenter(stroke);
+    const tapTarget = center ? resolveMidiTapTarget(normalized, center) : null;
+    const canUseTapTarget =
+      tapTarget !== null &&
+      (isTapStroke(stroke) || tapTarget.kind !== 'stepCell');
 
-    if (center && pointInBounds(center, layout.tapTempoButtonBounds)) {
-      return {
-        element: applyTapTempo(normalized, Date.now()),
-        consumed: true,
-        strokesConsumed: strokes,
-      };
-    }
-
-    if (center && pointInBounds(center, layout.playButtonBounds)) {
-      await primeMidiAudio();
-      return {
-        element: togglePlayState(normalized),
-        consumed: true,
-        strokesConsumed: strokes,
-      };
-    }
-
-    if (center && pointInBounds(center, layout.toggleModeBounds)) {
-      return {
-        element: toggleMode(normalized),
-        consumed: true,
-        strokesConsumed: strokes,
-      };
-    }
-
-    if (center && pointInBounds(center, layout.addLaneBounds)) {
-      return {
-        element: addLane(normalized),
-        consumed: true,
-        strokesConsumed: strokes,
-      };
-    }
-
-    for (const laneLayout of layout.lanes) {
-      if (center && pointInBounds(center, laneLayout.removeButtonBounds)) {
-        return {
-          element: removeLane(normalized, laneLayout.laneIndex),
-          consumed: true,
-          strokesConsumed: strokes,
-        };
-      }
-    }
-
-    if (center && normalized.openInstrumentLaneId) {
-      const openLaneIndex = normalized.lanes.findIndex(
-        (lane) => lane.id === normalized.openInstrumentLaneId
-      );
-      if (openLaneIndex >= 0) {
-        const selected = selectInstrumentFromMenu(normalized, openLaneIndex, center);
-        if (selected) {
+    if (tapTarget && canUseTapTarget) {
+      switch (tapTarget.kind) {
+        case 'tapTempo':
           return {
-            element: selected,
+            element: applyTapTempo(normalized, Date.now()),
             consumed: true,
             strokesConsumed: strokes,
           };
-        }
-
-        const openLaneLayout = layout.lanes[openLaneIndex];
-        if (pointInBounds(center, openLaneLayout.instrumentBounds)) {
+        case 'play':
+          await primeMidiAudio();
           return {
-            element: toggleInstrumentMenu(normalized, openLaneIndex),
+            element: togglePlayState(normalized),
             consumed: true,
             strokesConsumed: strokes,
           };
+        case 'toggleMode':
+          return {
+            element: toggleMode(normalized),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'download':
+          exportMidiFile(normalized);
+          return {
+            element: normalized,
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'addLane':
+          return {
+            element: addLane(normalized),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'removeLane':
+          return {
+            element: removeLane(normalized, tapTarget.laneIndex),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'selectInstrument': {
+          const selected = selectInstrumentFromMenu(
+            normalized,
+            tapTarget.laneIndex,
+            tapTarget.clampedCenter
+          );
+          if (selected) {
+            return {
+              element: selected,
+              consumed: true,
+              strokesConsumed: strokes,
+            };
+          }
+          break;
         }
-
-        if (pointInBounds(center, getMidiInteractionBounds(normalized))) {
+        case 'toggleInstrumentMenu':
+          return {
+            element: toggleInstrumentMenu(normalized, tapTarget.laneIndex),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'closeInstrumentMenu':
           return {
             element: {
               ...normalized,
@@ -634,17 +761,38 @@ export async function acceptInk(
             consumed: true,
             strokesConsumed: strokes,
           };
-        }
-      }
-    }
+        case 'stepCell': {
+          const lanes = normalized.lanes.map((lane) => ({
+            ...lane,
+            activeSteps: [...lane.activeSteps],
+            stepVelocities: [...lane.stepVelocities],
+          }));
+          const lane = lanes[tapTarget.laneIndex];
 
-    for (const laneLayout of layout.lanes) {
-      if (center && pointInBounds(center, laneLayout.instrumentBounds)) {
-        return {
-          element: toggleInstrumentMenu(normalized, laneLayout.laneIndex),
-          consumed: true,
-          strokesConsumed: strokes,
-        };
+          if (mode === 'tick') {
+            const nextVelocity = cycleVelocity(lane.stepVelocities[tapTarget.stepIndex]);
+            lane.stepVelocities[tapTarget.stepIndex] = nextVelocity;
+            lane.activeSteps[tapTarget.stepIndex] = nextVelocity !== 'off';
+          } else {
+            const willBeActive = !lane.activeSteps[tapTarget.stepIndex];
+            lane.activeSteps[tapTarget.stepIndex] = willBeActive;
+            lane.stepVelocities[tapTarget.stepIndex] = willBeActive
+              ? lane.stepVelocities[tapTarget.stepIndex] === 'off'
+                ? 'normal'
+                : lane.stepVelocities[tapTarget.stepIndex]
+              : 'off';
+          }
+
+          return {
+            element: {
+              ...normalized,
+              lanes,
+              openInstrumentLaneId: null,
+            },
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        }
       }
     }
   }

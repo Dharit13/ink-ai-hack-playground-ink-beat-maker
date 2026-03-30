@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
-import type { NoteElements, Element, Stroke, Brush } from '../types';
+import { InkToolType, type NoteElements, type Element, type Stroke, type Brush } from '../types';
 import type { InkTextElement } from '../elements/inktext/types';
+import { resolveMidiTapTarget } from '../elements/midi/interaction';
 import { beginMidiRenderFrame, endMidiRenderFrame, hasActiveMidiPlayback } from '../elements/midi/renderer';
 import { hasActiveTransitions as hasActiveImageTransitions } from '../elements/sketchableimage/renderer';
 import { hasActiveTicTacToeAnimations } from '../elements/tictactoe/renderer';
@@ -34,6 +35,24 @@ const PINCH_ZOOM_SENSITIVITY = 0.002;
 const TAP_MAX_DISTANCE = 10; // Max screen pixels finger can move and still count as tap
 const TAP_MAX_DURATION = 300; // Max ms for a tap gesture
 const TAP_SAME_SPOT_THRESHOLD = 20; // Max canvas-space pixels between taps to cycle selection
+const MOUSE_MIDI_TAP_MAX_DISTANCE = 6;
+const MOUSE_MIDI_TAP_MAX_DURATION = 300;
+
+function createSyntheticMouseTapStroke(
+  canvasPoint: { x: number; y: number },
+  brush: Brush
+): Stroke {
+  return {
+    inputs: {
+      tool: InkToolType.MOUSE,
+      inputs: [
+        { x: canvasPoint.x, y: canvasPoint.y, timeMillis: 0 },
+        { x: canvasPoint.x, y: canvasPoint.y, timeMillis: 1 },
+      ],
+    },
+    brush: { ...brush },
+  };
+}
 
 export interface InkCanvasProps {
   noteElements: NoteElements;
@@ -107,6 +126,7 @@ export function InkCanvas({
   // Drawing state
   const strokeBuilder = useRef<StrokeBuilder | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const mousePenDownInfo = useRef<{ pointerId: number; x: number; y: number; time: number } | null>(null);
 
   // Eraser state
   const [isErasing, setIsErasing] = useState(false);
@@ -837,6 +857,9 @@ export function InkCanvas({
       const brush = createDefaultBrush(hexToArgb(brushColor), brushSize);
       strokeBuilder.current = new StrokeBuilder({ brush });
       strokeBuilder.current.start(canvasPoint.x, canvasPoint.y, e.pressure, e.pointerType);
+      mousePenDownInfo.current = e.pointerType === 'mouse'
+        ? { pointerId: e.pointerId, x: e.clientX, y: e.clientY, time: Date.now() }
+        : null;
       setIsDrawing(true);
       onDrawingStart?.();
       overlay.setPointerCapture(e.pointerId);
@@ -1168,7 +1191,32 @@ export function InkCanvas({
           }, 2000);
           strokeTimeoutsRef.current.set(s, tid);
         }
+      } else {
+        const mouseDown = mousePenDownInfo.current;
+        const duration = mouseDown ? Date.now() - mouseDown.time : Infinity;
+        const movement = mouseDown
+          ? Math.hypot(e.clientX - mouseDown.x, e.clientY - mouseDown.y)
+          : Infinity;
+        const canvasPoint = screenToCanvas(viewport, {
+          x: e.nativeEvent.offsetX,
+          y: e.nativeEvent.offsetY,
+        });
+        const clickedElement = getElementAtPoint(canvasPoint.x, canvasPoint.y);
+        const shouldSynthesizeMidiTap =
+          currentTool === 'pen' &&
+          e.pointerType === 'mouse' &&
+          mouseDown?.pointerId === e.pointerId &&
+          duration <= MOUSE_MIDI_TAP_MAX_DURATION &&
+          movement <= MOUSE_MIDI_TAP_MAX_DISTANCE &&
+          clickedElement?.type === 'midi' &&
+          resolveMidiTapTarget(clickedElement, canvasPoint) !== null;
+
+        if (shouldSynthesizeMidiTap && onStrokeComplete) {
+          const brush = createDefaultBrush(hexToArgb(brushColor), brushSize);
+          onStrokeComplete(createSyntheticMouseTapStroke(canvasPoint, brush));
+        }
       }
+      mousePenDownInfo.current = null;
       strokeBuilder.current = null;
       setIsDrawing(false);
       if (overlay) {
@@ -1222,7 +1270,7 @@ export function InkCanvas({
         overlay.releasePointerCapture(e.pointerId);
       }
     }
-  }, [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, onStrokeComplete, renderOverlay, noteElements.elements, onElementsChange, getElementsInRect, getAllElementsAtPoint, selectedElementIds, onSelectionChange, viewport]);
+  }, [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, onStrokeComplete, renderOverlay, noteElements.elements, onElementsChange, getElementAtPoint, getElementsInRect, getAllElementsAtPoint, selectedElementIds, onSelectionChange, viewport, currentTool, brushColor, brushSize]);
 
   // Handle double-click to fit content (only in select/pan modes to avoid
   // accidental zoom during gameplay or rapid inking)

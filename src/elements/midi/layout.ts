@@ -27,6 +27,7 @@ export interface MidiLayout {
   headerTextBounds: BoundingBox;
   tempoDisplayBounds: BoundingBox;
   tapTempoButtonBounds: BoundingBox;
+  downloadButtonBounds: BoundingBox;
   addLaneBounds: BoundingBox;
   lanes: MidiLaneLayout[];
   headerHeight: number;
@@ -43,9 +44,11 @@ const MENU_ROW_HEIGHT = 22;
 const TOGGLE_BUTTON_WIDTH = 50;
 const TEMPO_DISPLAY_WIDTH = 58;
 const TAP_TEMPO_BUTTON_WIDTH = 74;
+const DOWNLOAD_BUTTON_SIZE = 24;
 const HEADER_TAP_TEMPO_GAP = 6;
 const HEADER_TEXT_GAP = 16;
-const CONTROL_HIT_PADDING = 8;
+export const MIDI_CONTROL_TAP_PADDING = 6;
+export const MIDI_STEP_GRID_TAP_PADDING = 4;
 const AUTOMATION_GAP = 8;
 const AUTOMATION_ZONE_REACH = 220;
 
@@ -87,7 +90,15 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   const headerTextBounds: BoundingBox = {
     left: toggleModeBounds.right + HEADER_TEXT_GAP,
     top: playButtonBounds.top,
-    right: bounds.right - OUTER_PADDING - TAP_TEMPO_BUTTON_WIDTH - HEADER_TAP_TEMPO_GAP - TEMPO_DISPLAY_WIDTH - CONTROL_GAP,
+    right:
+      bounds.right -
+      OUTER_PADDING -
+      DOWNLOAD_BUTTON_SIZE -
+      CONTROL_GAP -
+      TAP_TEMPO_BUTTON_WIDTH -
+      HEADER_TAP_TEMPO_GAP -
+      TEMPO_DISPLAY_WIDTH -
+      CONTROL_GAP,
     bottom: playButtonBounds.bottom,
   };
 
@@ -102,6 +113,13 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     left: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP,
     top: playButtonBounds.top,
     right: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP + TEMPO_DISPLAY_WIDTH,
+    bottom: playButtonBounds.bottom,
+  };
+
+  const downloadButtonBounds: BoundingBox = {
+    left: tempoDisplayBounds.right + CONTROL_GAP,
+    top: playButtonBounds.top,
+    right: tempoDisplayBounds.right + CONTROL_GAP + DOWNLOAD_BUTTON_SIZE,
     bottom: playButtonBounds.bottom,
   };
 
@@ -169,6 +187,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     headerTextBounds,
     tempoDisplayBounds,
     tapTempoButtonBounds,
+    downloadButtonBounds,
     addLaneBounds,
     lanes,
     headerHeight,
@@ -217,6 +236,14 @@ export function expandBounds(bounds: BoundingBox, padding: number): BoundingBox 
   };
 }
 
+export function getMidiPaddedControlBounds(bounds: BoundingBox): BoundingBox {
+  return expandBounds(bounds, MIDI_CONTROL_TAP_PADDING);
+}
+
+export function getMidiPaddedStepGridBounds(bounds: BoundingBox): BoundingBox {
+  return expandBounds(bounds, MIDI_STEP_GRID_TAP_PADDING);
+}
+
 export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
   const normalized = normalizeMidiElement(element);
   const layout = getMidiLayout(normalized);
@@ -227,13 +254,15 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
   let bottom = layout.bounds.bottom;
 
   const controlBounds = [
-    expandBounds(layout.playButtonBounds, CONTROL_HIT_PADDING),
-    expandBounds(layout.toggleModeBounds, CONTROL_HIT_PADDING),
-    expandBounds(layout.tapTempoButtonBounds, CONTROL_HIT_PADDING),
-    expandBounds(layout.addLaneBounds, CONTROL_HIT_PADDING),
+    getMidiPaddedControlBounds(layout.playButtonBounds),
+    getMidiPaddedControlBounds(layout.toggleModeBounds),
+    getMidiPaddedControlBounds(layout.tapTempoButtonBounds),
+    getMidiPaddedControlBounds(layout.downloadButtonBounds),
+    getMidiPaddedControlBounds(layout.addLaneBounds),
     ...layout.lanes.flatMap((lane) => [
-      expandBounds(lane.instrumentBounds, CONTROL_HIT_PADDING),
-      expandBounds(lane.removeButtonBounds, CONTROL_HIT_PADDING),
+      getMidiPaddedControlBounds(lane.instrumentBounds),
+      getMidiPaddedControlBounds(lane.removeButtonBounds),
+      getMidiPaddedStepGridBounds(lane.gridBounds),
     ]),
   ];
 
@@ -242,14 +271,14 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
       (lane) => normalized.lanes[lane.laneIndex]?.id === normalized.openInstrumentLaneId
     );
     if (openLane) {
-      controlBounds.push(expandBounds(openLane.instrumentMenuBounds, CONTROL_HIT_PADDING));
+      controlBounds.push(getMidiPaddedControlBounds(openLane.instrumentMenuBounds));
     }
   }
 
   if (layout.automationLaneBounds) {
-    controlBounds.push(expandBounds(layout.automationLaneBounds, CONTROL_HIT_PADDING));
+    controlBounds.push(getMidiPaddedControlBounds(layout.automationLaneBounds));
   } else {
-    controlBounds.push(expandBounds(getAutomationZoneBounds(normalized), CONTROL_HIT_PADDING));
+    controlBounds.push(getMidiPaddedControlBounds(getAutomationZoneBounds(normalized)));
   }
 
   for (const bounds of controlBounds) {

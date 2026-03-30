@@ -355,6 +355,7 @@ export function render(
   renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
   renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
   renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed);
+  renderDownloadButton(ctx, rc, layout.downloadButtonBounds, seed);
 
   for (const laneLayout of layout.lanes) {
     renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
@@ -467,6 +468,50 @@ function renderTapTempoButton(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('TAP TEMPO', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  ctx.restore();
+}
+
+function renderDownloadButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  seed: number
+): void {
+  ctx.save();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed + 4)
+  );
+
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  const iconTop = bounds.top + 6;
+  const iconBottom = bounds.bottom - 7;
+
+  ctx.strokeStyle = '#2f3b52';
+  ctx.fillStyle = '#2f3b52';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(centerX, iconTop);
+  ctx.lineTo(centerX, centerY + 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(centerX - 5, centerY - 1);
+  ctx.lineTo(centerX, centerY + 5);
+  ctx.lineTo(centerX + 5, centerY - 1);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(centerX - 6, iconBottom);
+  ctx.lineTo(centerX + 6, iconBottom);
+  ctx.stroke();
   ctx.restore();
 }
 
