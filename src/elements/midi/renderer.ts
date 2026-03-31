@@ -721,12 +721,12 @@ function renderOpenExportMenu(
     bowing: 0.7,
     stroke: '#2f3b52',
     strokeWidth: 1.4,
-    fill: '#fffaf0',
+    fill: '#d7ebe4',
     fillStyle: 'solid',
     seed: seed + 520,
   });
 
-  ctx.fillStyle = '#64748b';
+  ctx.fillStyle = '#475569';
   ctx.font = '17px "Caveat", cursive';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
