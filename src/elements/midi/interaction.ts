@@ -1198,7 +1198,12 @@ export async function acceptInk(
 }
 
 export function getHandles(element: MidiElement) {
-  const bounds = getMidiBounds(normalizeMidiElement(element));
+  const normalized = normalizeMidiElement(element);
+  if (normalized.exportMenuOpen) {
+    return [];
+  }
+
+  const bounds = getMidiBounds(normalized);
   return [
     {
       id: 'resizeRight',

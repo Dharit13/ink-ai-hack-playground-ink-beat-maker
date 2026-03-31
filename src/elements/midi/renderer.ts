@@ -142,7 +142,12 @@ export function hasActiveMidiPlayback(): boolean {
 }
 
 export function getHandles(element: MidiElement): HandleDescriptor[] {
-  const bounds = getMidiBounds(normalizeMidiElement(element));
+  const normalized = normalizeMidiElement(element);
+  if (normalized.exportMenuOpen) {
+    return [];
+  }
+
+  const bounds = getMidiBounds(normalized);
   const centerY = (bounds.top + bounds.bottom) / 2;
 
   return [
@@ -207,12 +212,11 @@ export function render(
   }
 
   renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed);
-  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
-  renderOpenExportMenu(ctx, rc, normalized, layout, seed);
-
   if (normalized.automationEnabled && layout.automationLaneBounds) {
     renderAutomationLane(ctx, rc, normalized, layout, seed);
   }
+  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
+  renderOpenExportMenu(ctx, rc, normalized, layout, seed);
 
   ctx.restore();
 }
