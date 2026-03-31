@@ -1,5 +1,6 @@
 import { showToast } from '../../toast/Toast';
 import { createMidiOutputNode, getPatternDurationSeconds, scheduleElementPlayback } from './audio';
+import { buildDruminkExportBaseName } from './exportFileName';
 import type { MidiElement } from './types';
 import { clampExportLoopCount, normalizeMidiElement } from './types';
 
@@ -86,7 +87,7 @@ export async function exportWavFile(
 
     const rendered = await context.startRendering();
     const wavBlob = encodeWavMono(rendered);
-    downloadBlob(wavBlob, `beat-${String(normalized.id).slice(0, 8)}.wav`);
+    downloadBlob(wavBlob, `${buildDruminkExportBaseName()}.wav`);
   } catch (error) {
     console.error('WAV export failed', error);
     showToast('WAV export failed.');

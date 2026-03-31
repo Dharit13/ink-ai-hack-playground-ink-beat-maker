@@ -757,7 +757,7 @@ function renderOpenExportMenu(
     ctx.font = '17px "Caveat", cursive';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Audio length (num of loops)', bounds.left + 8, bounds.top + 16);
+    ctx.fillText('Number of loops', bounds.left + 8, bounds.top + 16);
   }
 
   if (layout.exportLoopDecrementBounds && layout.exportLoopDisplayBounds && layout.exportLoopIncrementBounds) {

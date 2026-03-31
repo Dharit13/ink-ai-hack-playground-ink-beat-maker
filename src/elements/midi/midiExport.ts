@@ -1,3 +1,4 @@
+import { buildDruminkExportBaseName } from './exportFileName';
 import type { MidiElement, MidiInstrument, MidiLane, StepVelocity } from './types';
 
 const TICKS_PER_QUARTER = 480;
@@ -136,10 +137,11 @@ export function exportMidiFile(element: MidiElement, applyAutomation = true): vo
   const bytes = buildMidiFile(element, applyAutomation);
   const blob = new Blob([bytes], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
+  const fileName = `${buildDruminkExportBaseName()}.mid`;
 
   const a = document.createElement('a');
   a.href = url;
-  a.download = `beat-${String(element.id).slice(0, 8)}.mid`;
+  a.download = fileName;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
