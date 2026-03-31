@@ -27,6 +27,7 @@ import {
   getStepVelocity,
   scheduleLaneSoundAtTime,
 } from './audio';
+import { isMidiFontReady } from './font';
 
 interface PlaybackRuntimeState {
   startedAt: number;
@@ -177,6 +178,7 @@ export function render(
   const currentStep = syncPlayback(normalized, currentFrameTime);
   const seed = seedFromId(normalized.id);
   const rc = getRoughCanvas(ctx);
+  const textReady = isMidiFontReady();
 
   ctx.save();
   ctx.shadowBlur = 5;
@@ -190,33 +192,35 @@ export function render(
   );
   ctx.shadowBlur = 0;
 
-  applyHeaderMetaTextStyle(ctx);
-  ctx.textAlign = 'center';
-  ctx.fillText(
-    `${normalized.steps} Steps · ${normalized.lanes.length} Lane${normalized.lanes.length === 1 ? '' : 's'}`,
-    layout.headerTextBounds.left + (layout.headerTextBounds.right - layout.headerTextBounds.left) * 0.42,
-    (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
-  );
+  if (textReady) {
+    applyHeaderMetaTextStyle(ctx);
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      `${normalized.steps} Steps · ${normalized.lanes.length} Lane${normalized.lanes.length === 1 ? '' : 's'}`,
+      layout.headerTextBounds.left + (layout.headerTextBounds.right - layout.headerTextBounds.left) * 0.42,
+      (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
+    );
+  }
 
   renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
-  renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
+  renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed, textReady);
   renderTempoGroup(ctx, rc, layout, seed + 10);
   renderTempoAdjustButton(ctx, rc, layout.tempoDecrementBounds, '-', seed + 11);
-  renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
+  renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo, textReady);
   renderTempoAdjustButton(ctx, rc, layout.tempoIncrementBounds, '+', seed + 12);
-  renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed);
+  renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed, textReady);
   renderDownloadButton(ctx, rc, layout.downloadButtonBounds, normalized.exportMenuOpen, seed);
 
   for (const laneLayout of layout.lanes) {
-    renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed);
+    renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed, textReady);
   }
 
-  renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed);
+  renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed, textReady);
   if (normalized.automationEnabled && layout.automationLaneBounds) {
-    renderAutomationLane(ctx, rc, normalized, layout, seed);
+    renderAutomationLane(ctx, rc, normalized, layout, seed, textReady);
   }
-  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed);
-  renderOpenExportMenu(ctx, rc, normalized, layout, seed);
+  renderOpenInstrumentMenu(ctx, rc, normalized, layout, seed, textReady);
+  renderOpenExportMenu(ctx, rc, normalized, layout, seed, textReady);
 
   ctx.restore();
 }
@@ -263,7 +267,8 @@ function renderModeToggle(
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
   mode: MidiInputMode,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   ctx.save();
   const isTickMode = mode === 'tick';
@@ -277,20 +282,28 @@ function renderModeToggle(
   );
 
   ctx.fillStyle = isTickMode ? '#ffffff' : '#2f3b52';
-  ctx.font = 'bold 15px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  if (textReady) {
+    ctx.font = 'bold 15px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isTickMode ? 'TICK' : 'TAP', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  }
   ctx.restore();
 }
 
 function renderTempoDisplay(
   ctx: CanvasRenderingContext2D,
   bounds: BoundingBox,
-  tempo: number
+  tempo: number,
+  textReady: boolean
 ): void {
+  if (!textReady) {
+    return;
+  }
+
   ctx.save();
   applyHeaderMetaTextStyle(ctx);
+  ctx.fillStyle = '#2f3b52';
   ctx.textAlign = 'center';
   ctx.fillText(`${tempo} BPM`, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
   ctx.restore();
@@ -351,7 +364,8 @@ function renderTapTempoButton(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   ctx.save();
   rc.rectangle(
@@ -362,11 +376,13 @@ function renderTapTempoButton(
     sketchButtonActive(getLaneAccentColor('kick'), seed + 3)
   );
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('TAP TEMPO', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  if (textReady) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 14px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TAP TEMPO', (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  }
   ctx.restore();
 }
 
@@ -422,7 +438,8 @@ function renderLane(
   laneLayout: ReturnType<typeof getMidiLayout>['lanes'][number],
   currentStep: number | null,
   mode: MidiInputMode,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   const lane = element.lanes[laneLayout.laneIndex];
   const accentColor = getLaneAccentColor(lane.instrument);
@@ -459,20 +476,22 @@ function renderLane(
     sketchTickLine(accentColor, 7, seed + laneLayout.laneIndex * 37 + 3)
   );
 
-  ctx.fillStyle = '#2f3b52';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.font = '500 17px "Caveat", cursive';
-  ctx.fillText(
-    getInstrumentLabel(lane.instrument),
-    labelX,
-    laneLayout.instrumentBounds.top + 21,
-    labelMaxWidth
-  );
+  if (textReady) {
+    ctx.fillStyle = '#2f3b52';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '500 17px "Caveat", cursive';
+    ctx.fillText(
+      getInstrumentLabel(lane.instrument),
+      labelX,
+      laneLayout.instrumentBounds.top + 21,
+      labelMaxWidth
+    );
 
-  ctx.fillStyle = '#64748b';
-  ctx.font = '14px "Caveat", cursive';
-  ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
+    ctx.fillStyle = '#64748b';
+    ctx.font = '14px "Caveat", cursive';
+    ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
+  }
 
   ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1.5;
@@ -599,7 +618,8 @@ function renderAddLaneButton(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   ctx.save();
   rc.rectangle(
@@ -621,11 +641,13 @@ function renderAddLaneButton(
   ctx.lineTo(centerX, centerY + 6);
   ctx.stroke();
 
-  ctx.fillStyle = '#64748b';
-  ctx.font = '16px "Caveat", cursive';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Add Lane', bounds.right + 8, centerY);
+  if (textReady) {
+    ctx.fillStyle = '#64748b';
+    ctx.font = '16px "Caveat", cursive';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Add Lane', bounds.right + 8, centerY);
+  }
   ctx.restore();
 }
 
@@ -662,7 +684,8 @@ function renderOpenInstrumentMenu(
   rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   layout: ReturnType<typeof getMidiLayout>,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   if (!element.openInstrumentLaneId) return;
 
@@ -696,11 +719,13 @@ function renderOpenInstrumentMenu(
     ctx.roundRect(bounds.left + 8, rowTop + 5, 6, 12, 3);
     ctx.fill();
 
-    ctx.fillStyle = '#2f3b52';
-    ctx.font = '14px "Caveat", cursive';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(getInstrumentLabel(instrument), bounds.left + 20, rowTop + 11);
+    if (textReady) {
+      ctx.fillStyle = '#2f3b52';
+      ctx.font = '14px "Caveat", cursive';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(getInstrumentLabel(instrument), bounds.left + 20, rowTop + 11);
+    }
   });
   ctx.restore();
 }
@@ -710,7 +735,8 @@ function renderOpenExportMenu(
   rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   layout: ReturnType<typeof getMidiLayout>,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   if (!element.exportMenuOpen || !layout.exportMenuBounds) return;
 
@@ -726,14 +752,16 @@ function renderOpenExportMenu(
     seed: seed + 520,
   });
 
-  ctx.fillStyle = '#475569';
-  ctx.font = '17px "Caveat", cursive';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('Audio length (num of loops)', bounds.left + 8, bounds.top + 16);
+  if (textReady) {
+    ctx.fillStyle = '#475569';
+    ctx.font = '17px "Caveat", cursive';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Audio length (num of loops)', bounds.left + 8, bounds.top + 16);
+  }
 
   if (layout.exportLoopDecrementBounds && layout.exportLoopDisplayBounds && layout.exportLoopIncrementBounds) {
-    renderLoopAdjustButton(ctx, rc, layout.exportLoopDecrementBounds, '-', seed + 530);
+    renderLoopAdjustButton(ctx, rc, layout.exportLoopDecrementBounds, '-', seed + 530, textReady);
 
     rc.rectangle(
       layout.exportLoopDisplayBounds.left,
@@ -742,17 +770,19 @@ function renderOpenExportMenu(
       layout.exportLoopDisplayBounds.bottom - layout.exportLoopDisplayBounds.top,
       sketchButtonIdle(seed + 531)
     );
-    ctx.fillStyle = '#2f3b52';
-    ctx.font = 'bold 17px "Caveat", cursive';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(
-      `${element.selectedExportLoopCount ?? 1}x`,
-      (layout.exportLoopDisplayBounds.left + layout.exportLoopDisplayBounds.right) / 2,
-      (layout.exportLoopDisplayBounds.top + layout.exportLoopDisplayBounds.bottom) / 2 - 1
-    );
+    if (textReady) {
+      ctx.fillStyle = '#2f3b52';
+      ctx.font = 'bold 18px "Caveat", cursive';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${element.selectedExportLoopCount ?? 1}x`,
+        (layout.exportLoopDisplayBounds.left + layout.exportLoopDisplayBounds.right) / 2,
+        (layout.exportLoopDisplayBounds.top + layout.exportLoopDisplayBounds.bottom) / 2 - 1
+      );
+    }
 
-    renderLoopAdjustButton(ctx, rc, layout.exportLoopIncrementBounds, '+', seed + 532);
+    renderLoopAdjustButton(ctx, rc, layout.exportLoopIncrementBounds, '+', seed + 532, textReady);
   }
 
   if (layout.exportAutomationToggleBounds) {
@@ -762,7 +792,8 @@ function renderOpenExportMenu(
       layout.exportAutomationToggleBounds,
       element.automationHasData ?? false,
       element.selectedExportApplyAutomation ?? true,
-      seed + 545
+      seed + 545,
+      textReady
     );
   }
 
@@ -773,7 +804,8 @@ function renderOpenExportMenu(
       layout.exportMidiActionBounds,
       'MIDI (.mid)',
       '#475569',
-      seed + 560
+      seed + 560,
+      textReady
     );
   }
 
@@ -784,7 +816,8 @@ function renderOpenExportMenu(
       layout.exportAudioActionBounds,
       'Audio (.wav)',
       '#0f766e',
-      seed + 561
+      seed + 561,
+      textReady
     );
   }
 
@@ -797,7 +830,8 @@ function renderExportAutomationToggle(
   bounds: BoundingBox,
   hasAutomation: boolean,
   applyAutomation: boolean,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   const stateLabel = hasAutomation ? (applyAutomation ? ' ON' : 'OFF') : 'No curve';
   const fillColor = !hasAutomation
@@ -829,26 +863,31 @@ function renderExportAutomationToggle(
 
   ctx.save();
   ctx.fillStyle = textColor;
-  ctx.font = 'bold 17px "Caveat", cursive';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
   const labelX = bounds.left + labelInset;
   const label = 'Apply VOL curve';
-  ctx.fillText(
-    label,
-    labelX,
-    centerY
-  );
-
-  ctx.font = 'bold 15px "Caveat", cursive';
-  const stateWidth = ctx.measureText(stateLabel).width;
-  ctx.font = 'bold 17px "Caveat", cursive';
-  const labelWidth = ctx.measureText(label).width;
-  ctx.font = 'bold 15px "Caveat", cursive';
   const stateX = bounds.right - stateInset;
-  const preferredIconLeft = labelX + labelWidth + labelIconGap;
-  const maxIconLeft = stateX - stateWidth - stateIconGap - iconWidth;
-  const iconLeft = Math.min(preferredIconLeft, maxIconLeft);
+  let iconLeft = bounds.right - stateInset - iconWidth;
+
+  if (textReady) {
+    ctx.font = 'bold 17px "Caveat", cursive';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      label,
+      labelX,
+      centerY
+    );
+
+    ctx.font = 'bold 15px "Caveat", cursive';
+    const stateWidth = ctx.measureText(stateLabel).width;
+    ctx.font = 'bold 17px "Caveat", cursive';
+    const labelWidth = ctx.measureText(label).width;
+    ctx.font = 'bold 15px "Caveat", cursive';
+    const preferredIconLeft = labelX + labelWidth + labelIconGap;
+    const maxIconLeft = stateX - stateWidth - stateIconGap - iconWidth;
+    iconLeft = Math.min(preferredIconLeft, maxIconLeft);
+  }
+
   const iconTop = centerY - iconHeight / 2;
 
   ctx.shadowBlur = 0;
@@ -874,8 +913,10 @@ function renderExportAutomationToggle(
   );
   ctx.stroke();
 
-  ctx.textAlign = 'right';
-  ctx.fillText(stateLabel, stateX, centerY);
+  if (textReady) {
+    ctx.textAlign = 'right';
+    ctx.fillText(stateLabel, stateX, centerY);
+  }
   ctx.restore();
 }
 
@@ -885,7 +926,8 @@ function renderExportActionButton(
   bounds: BoundingBox,
   label: string,
   color: string,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   rc.rectangle(
     bounds.left,
@@ -895,19 +937,22 @@ function renderExportActionButton(
     sketchButtonActive(color, seed)
   );
 
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 17px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  if (textReady) {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 17px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  }
 }
 
 function renderLoopAdjustButton(
   ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
-  label: string,
-  seed: number
+  label: '+' | '-',
+  seed: number,
+  textReady: boolean
 ): void {
   rc.rectangle(
     bounds.left,
@@ -917,11 +962,13 @@ function renderLoopAdjustButton(
     sketchButtonIdle(seed)
   );
 
-  ctx.fillStyle = '#2f3b52';
-  ctx.font = 'bold 18px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  if (textReady) {
+    ctx.fillStyle = '#2f3b52';
+    ctx.font = 'bold 18px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
+  }
 }
 
 function renderAutomationCurve(
@@ -993,7 +1040,8 @@ function renderAutomationLane(
   rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   layout: ReturnType<typeof getMidiLayout>,
-  seed: number
+  seed: number,
+  textReady: boolean
 ): void {
   if (!layout.automationLaneBounds) return;
 
@@ -1012,11 +1060,13 @@ function renderAutomationLane(
   const indicatorX = lane.left + 4;
   const indicatorY = lane.top + 4;
   rc.rectangle(indicatorX, indicatorY, indicatorW, indicatorH, sketchVolBox(seed + 601));
-  ctx.fillStyle = '#2f3b52';
-  ctx.font = 'bold 15px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+  if (textReady) {
+    ctx.fillStyle = '#2f3b52';
+    ctx.font = 'bold 15px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('VOL', indicatorX + indicatorW / 2, indicatorY + indicatorH / 2);
+  }
 
   renderAutomationCurve(ctx, element, lane);
 

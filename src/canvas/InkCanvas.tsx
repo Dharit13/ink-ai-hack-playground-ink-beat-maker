@@ -8,6 +8,7 @@ import {
   resolveMidiTempoTapTarget,
   type MidiTempoTapTarget,
 } from '../elements/midi/interaction';
+import { ensureMidiFontReady } from '../elements/midi/font';
 import { beginMidiRenderFrame, endMidiRenderFrame, hasActiveMidiPlayback } from '../elements/midi/renderer';
 import { hasActiveTransitions as hasActiveImageTransitions } from '../elements/sketchableimage/renderer';
 import { hasActiveTicTacToeAnimations } from '../elements/tictactoe/renderer';
@@ -148,6 +149,7 @@ export function InkCanvas({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<Viewport>(initialViewport ?? DEFAULT_VIEWPORT);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [midiFontEpoch, setMidiFontEpoch] = useState(0);
 
   // Panning state
   const [isPanning, setIsPanning] = useState(false);
@@ -502,6 +504,7 @@ export function InkCanvas({
 
   // Render the main canvas (static content)
   const render = useCallback((timestamp?: number) => {
+    void midiFontEpoch;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -584,7 +587,7 @@ export function InkCanvas({
     ) {
       animationFrameRef.current = requestAnimationFrame(render);
     }
-  }, [noteElements, viewport, canvasSize, showDebugOverlay, animatingElements, animationDuration, getSizeMultiplier, onAnimationComplete, selectedElementIds]);
+  }, [noteElements, viewport, showDebugOverlay, animatingElements, animationDuration, getSizeMultiplier, onAnimationComplete, selectedElementIds, midiFontEpoch]);
 
   // Render the overlay canvas (in-progress stroke and selection marquee)
   const renderOverlay = useCallback(() => {
@@ -702,6 +705,20 @@ export function InkCanvas({
   useEffect(() => {
     render();
   }, [render]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    void ensureMidiFontReady().then(() => {
+      if (!isCancelled) {
+        setMidiFontEpoch((current) => current + 1);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   // Start animation loop when animating elements change or elements are generating
   const hasGeneratingElements = noteElements.elements.some(
