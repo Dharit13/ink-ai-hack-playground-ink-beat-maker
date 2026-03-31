@@ -1,7 +1,13 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { InkToolType, type NoteElements, type Element, type Stroke, type Brush } from '../types';
 import type { InkTextElement } from '../elements/inktext/types';
-import { resolveMidiTapTarget } from '../elements/midi/interaction';
+import {
+  applyTempoTapTarget,
+  getMidiTempoControlBounds,
+  resolveMidiTapTarget,
+  resolveMidiTempoTapTarget,
+  type MidiTempoTapTarget,
+} from '../elements/midi/interaction';
 import { beginMidiRenderFrame, endMidiRenderFrame, hasActiveMidiPlayback } from '../elements/midi/renderer';
 import { hasActiveTransitions as hasActiveImageTransitions } from '../elements/sketchableimage/renderer';
 import { hasActiveTicTacToeAnimations } from '../elements/tictactoe/renderer';
@@ -37,6 +43,8 @@ const TAP_MAX_DURATION = 300; // Max ms for a tap gesture
 const TAP_SAME_SPOT_THRESHOLD = 20; // Max canvas-space pixels between taps to cycle selection
 const MOUSE_MIDI_TAP_MAX_DISTANCE = 6;
 const MOUSE_MIDI_TAP_MAX_DURATION = 300;
+const MIDI_TEMPO_HOLD_DELAY_MS = 400;
+const MIDI_TEMPO_HOLD_REPEAT_MS = 100;
 
 function createSyntheticMouseTapStroke(
   canvasPoint: { x: number; y: number },
@@ -52,6 +60,30 @@ function createSyntheticMouseTapStroke(
     },
     brush: { ...brush },
   };
+}
+
+function getCanvasPointFromPointerEvent(
+  viewport: Viewport,
+  canvas: HTMLCanvasElement,
+  e: React.PointerEvent
+): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  return screenToCanvas(viewport, {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+  });
+}
+
+function pointInBounds(
+  point: { x: number; y: number },
+  bounds: { left: number; top: number; right: number; bottom: number }
+): boolean {
+  return (
+    point.x >= bounds.left &&
+    point.x <= bounds.right &&
+    point.y >= bounds.top &&
+    point.y <= bounds.bottom
+  );
 }
 
 export interface InkCanvasProps {
@@ -172,6 +204,62 @@ export function InkCanvas({
   const finishedStrokesRef = useRef<Set<Stroke>>(new Set());
   // Track safety timeout IDs for each stroke so we can cancel them when strokes are consumed
   const strokeTimeoutsRef = useRef<Map<Stroke, ReturnType<typeof setTimeout>>>(new Map());
+  const noteElementsRef = useRef(noteElements.elements);
+  const onElementsChangeRef = useRef(onElementsChange);
+  const activeMidiTempoPress = useRef<{
+    pointerId: number;
+    elementId: string;
+    target: MidiTempoTapTarget;
+    bounds: { left: number; top: number; right: number; bottom: number };
+    initialDelayTimeoutId: ReturnType<typeof setTimeout> | null;
+    repeatIntervalId: ReturnType<typeof setInterval> | null;
+  } | null>(null);
+
+  const stopMidiTempoPress = useCallback((pointerId?: number) => {
+    const activePress = activeMidiTempoPress.current;
+    if (!activePress || (pointerId !== undefined && activePress.pointerId !== pointerId)) {
+      return false;
+    }
+
+    if (activePress.initialDelayTimeoutId !== null) {
+      clearTimeout(activePress.initialDelayTimeoutId);
+    }
+    if (activePress.repeatIntervalId !== null) {
+      clearInterval(activePress.repeatIntervalId);
+    }
+
+    const overlay = overlayCanvasRef.current;
+    if (overlay?.hasPointerCapture(activePress.pointerId)) {
+      overlay.releasePointerCapture(activePress.pointerId);
+    }
+
+    activeMidiTempoPress.current = null;
+    return true;
+  }, []);
+
+  const applyMidiTempoPress = useCallback((elementId: string, target: MidiTempoTapTarget) => {
+    const changeHandler = onElementsChangeRef.current;
+    if (!changeHandler) {
+      stopMidiTempoPress();
+      return false;
+    }
+
+    const elements = noteElementsRef.current;
+    const element = elements.find((candidate) => candidate.id === elementId);
+    if (!element || element.type !== 'midi') {
+      stopMidiTempoPress();
+      return false;
+    }
+
+    const updated = applyTempoTapTarget(element, target);
+    if (updated.tempo !== element.tempo) {
+      changeHandler(elements.map((candidate) => (
+        candidate.id === element.id ? updated : candidate
+      )));
+    }
+
+    return true;
+  }, [stopMidiTempoPress]);
 
   // Calculate size multiplier for an animating element (1 -> 2 -> 1 over duration)
   const getSizeMultiplier = useCallback((startTime: number, now: number) => {
@@ -283,6 +371,72 @@ export function InkCanvas({
     const all = getAllElementsAtPoint(canvasX, canvasY);
     return all.length > 0 ? all[0] : null;
   }, [getAllElementsAtPoint]);
+
+  const tryStartMidiTempoPress = useCallback((e: React.PointerEvent, overlay: HTMLCanvasElement) => {
+    if (currentTool !== 'pen') return false;
+    if (activeMidiTempoPress.current) return false;
+    if (e.pointerType !== 'touch' && e.button !== 0) return false;
+    if (!onElementsChangeRef.current) return false;
+
+    const canvasPoint = getCanvasPointFromPointerEvent(viewport, overlay, e);
+    const clickedElement = getElementAtPoint(canvasPoint.x, canvasPoint.y);
+    if (!clickedElement || clickedElement.type !== 'midi') {
+      return false;
+    }
+
+    const target = resolveMidiTempoTapTarget(clickedElement, canvasPoint);
+    if (!target) {
+      return false;
+    }
+
+    const activePress = {
+      pointerId: e.pointerId,
+      elementId: clickedElement.id,
+      target,
+      bounds: getMidiTempoControlBounds(clickedElement, target),
+      initialDelayTimeoutId: null as ReturnType<typeof setTimeout> | null,
+      repeatIntervalId: null as ReturnType<typeof setInterval> | null,
+    };
+    activeMidiTempoPress.current = activePress;
+
+    const pointerId = e.pointerId;
+    overlay.setPointerCapture(pointerId);
+    if (!applyMidiTempoPress(clickedElement.id, target)) {
+      stopMidiTempoPress(pointerId);
+      return false;
+    }
+
+    activePress.initialDelayTimeoutId = setTimeout(() => {
+      const currentPress = activeMidiTempoPress.current;
+      if (!currentPress || currentPress.pointerId !== pointerId) {
+        return;
+      }
+
+      currentPress.repeatIntervalId = setInterval(() => {
+        const repeatingPress = activeMidiTempoPress.current;
+        if (!repeatingPress || repeatingPress.pointerId !== pointerId) {
+          return;
+        }
+
+        applyMidiTempoPress(repeatingPress.elementId, repeatingPress.target);
+      }, MIDI_TEMPO_HOLD_REPEAT_MS);
+    }, MIDI_TEMPO_HOLD_DELAY_MS);
+
+    e.preventDefault();
+    return true;
+  }, [currentTool, viewport, getElementAtPoint, applyMidiTempoPress, stopMidiTempoPress]);
+
+  useEffect(() => {
+    noteElementsRef.current = noteElements.elements;
+  }, [noteElements.elements]);
+
+  useEffect(() => {
+    onElementsChangeRef.current = onElementsChange;
+  }, [onElementsChange]);
+
+  useEffect(() => () => {
+    stopMidiTempoPress();
+  }, [stopMidiTempoPress]);
 
   // Update brush when color/size changes
   useEffect(() => {
@@ -708,6 +862,15 @@ export function InkCanvas({
     const overlay = overlayCanvasRef.current;
     if (!overlay) return;
 
+    if (activeMidiTempoPress.current && activeMidiTempoPress.current.pointerId !== e.pointerId) {
+      e.preventDefault();
+      return;
+    }
+
+    if (tryStartMidiTempoPress(e, overlay)) {
+      return;
+    }
+
     // Track all active touch pointers for pinch-zoom
     if (e.pointerType === 'touch') {
       activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -925,11 +1088,27 @@ export function InkCanvas({
       overlay.setPointerCapture(e.pointerId);
       e.preventDefault();
     }
-  }, [shouldPan, currentTool, viewport, brushColor, brushSize, eraseAt, getElementAtPoint, selectedElementIds, onSelectionChange, selectionIntent, onSelectionIntentChange, disambiguationIntent, onDisambiguationAction, paletteIntent, onPaletteAction, noteElements.elements, onElementsChange, onDrawingStart, tryStartHandleDrag, isHandleDragging, activeHandle]);
+  }, [shouldPan, currentTool, viewport, brushColor, brushSize, eraseAt, getElementAtPoint, selectedElementIds, onSelectionChange, selectionIntent, onSelectionIntentChange, disambiguationIntent, onDisambiguationAction, paletteIntent, onPaletteAction, noteElements.elements, onElementsChange, onDrawingStart, tryStartHandleDrag, isHandleDragging, activeHandle, tryStartMidiTempoPress]);
 
   // Handle pointer move
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      const activeTempoPress = activeMidiTempoPress.current;
+      if (activeTempoPress?.pointerId === e.pointerId) {
+        const overlay = overlayCanvasRef.current;
+        if (!overlay) {
+          stopMidiTempoPress(e.pointerId);
+          return;
+        }
+
+        const canvasPoint = getCanvasPointFromPointerEvent(viewport, overlay, e);
+        if (!pointInBounds(canvasPoint, activeTempoPress.bounds)) {
+          stopMidiTempoPress(e.pointerId);
+        }
+        e.preventDefault();
+        return;
+      }
+
       // Update touch tracking and handle pinch-zoom
       if (e.pointerType === 'touch' && activeTouches.current.has(e.pointerId)) {
         activeTouches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1023,12 +1202,16 @@ export function InkCanvas({
         renderOverlay();
       }
     },
-    [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, viewport, onViewportChange, renderOverlay, eraseAt, selectedElementIds, onElementsMove, noteElements.elements, onElementsChange]
+    [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, viewport, onViewportChange, renderOverlay, eraseAt, selectedElementIds, onElementsMove, noteElements.elements, onElementsChange, stopMidiTempoPress]
   );
 
   // Handle pointer up
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     const overlay = overlayCanvasRef.current;
+
+    if (stopMidiTempoPress(e.pointerId)) {
+      return;
+    }
 
     // Clean up touch tracking
     if (e.pointerType === 'touch') {
@@ -1270,7 +1453,7 @@ export function InkCanvas({
         overlay.releasePointerCapture(e.pointerId);
       }
     }
-  }, [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, onStrokeComplete, renderOverlay, noteElements.elements, onElementsChange, getElementAtPoint, getElementsInRect, getAllElementsAtPoint, selectedElementIds, onSelectionChange, viewport, currentTool, brushColor, brushSize]);
+  }, [isPanning, isHandleDragging, activeHandle, isDragging, isDrawing, isErasing, isSelectingMarquee, onStrokeComplete, renderOverlay, noteElements.elements, onElementsChange, getElementAtPoint, getElementsInRect, getAllElementsAtPoint, selectedElementIds, onSelectionChange, viewport, currentTool, brushColor, brushSize, stopMidiTempoPress]);
 
   // Handle double-click to fit content (only in select/pan modes to avoid
   // accidental zoom during gameplay or rapid inking)

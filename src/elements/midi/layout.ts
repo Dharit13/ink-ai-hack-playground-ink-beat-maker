@@ -26,7 +26,9 @@ export interface MidiLayout {
   playButtonBounds: BoundingBox;
   toggleModeBounds: BoundingBox;
   headerTextBounds: BoundingBox;
+  tempoDecrementBounds: BoundingBox;
   tempoDisplayBounds: BoundingBox;
+  tempoIncrementBounds: BoundingBox;
   tapTempoButtonBounds: BoundingBox;
   downloadButtonBounds: BoundingBox;
   exportMenuBounds?: BoundingBox;
@@ -51,9 +53,11 @@ const REMOVE_BUTTON_SIZE = 14;
 const MENU_ROW_HEIGHT = 22;
 const TOGGLE_BUTTON_WIDTH = 50;
 const TEMPO_DISPLAY_WIDTH = 58;
+const TEMPO_BUTTON_SIZE = 24;
 const TAP_TEMPO_BUTTON_WIDTH = 74;
 const DOWNLOAD_BUTTON_SIZE = 24;
 const HEADER_TAP_TEMPO_GAP = 6;
+const HEADER_TEMPO_BUTTON_GAP = 6;
 const HEADER_TEXT_GAP = 16;
 export const MIDI_CONTROL_TAP_PADDING = 6;
 export const MIDI_STEP_GRID_TAP_PADDING = 4;
@@ -107,39 +111,45 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: playButtonBounds.bottom,
   };
 
-  const headerTextBounds: BoundingBox = {
-    left: toggleModeBounds.right + HEADER_TEXT_GAP,
+  const downloadButtonBounds: BoundingBox = {
+    left: bounds.right - OUTER_PADDING - DOWNLOAD_BUTTON_SIZE,
     top: playButtonBounds.top,
-    right:
-      bounds.right -
-      OUTER_PADDING -
-      DOWNLOAD_BUTTON_SIZE -
-      CONTROL_GAP -
-      TAP_TEMPO_BUTTON_WIDTH -
-      HEADER_TAP_TEMPO_GAP -
-      TEMPO_DISPLAY_WIDTH -
-      CONTROL_GAP,
+    right: bounds.right - OUTER_PADDING,
     bottom: playButtonBounds.bottom,
   };
 
-  const tapTempoButtonBounds: BoundingBox = {
-    left: bounds.right - OUTER_PADDING - TEMPO_DISPLAY_WIDTH - HEADER_TAP_TEMPO_GAP - TAP_TEMPO_BUTTON_WIDTH,
+  const tempoIncrementBounds: BoundingBox = {
+    left: downloadButtonBounds.left - CONTROL_GAP - TEMPO_BUTTON_SIZE,
     top: playButtonBounds.top,
-    right: bounds.right - OUTER_PADDING - TEMPO_DISPLAY_WIDTH - HEADER_TAP_TEMPO_GAP,
+    right: downloadButtonBounds.left - CONTROL_GAP,
     bottom: playButtonBounds.bottom,
   };
 
   const tempoDisplayBounds: BoundingBox = {
-    left: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP,
+    left: tempoIncrementBounds.left - HEADER_TEMPO_BUTTON_GAP - TEMPO_DISPLAY_WIDTH,
     top: playButtonBounds.top,
-    right: tapTempoButtonBounds.right + HEADER_TAP_TEMPO_GAP + TEMPO_DISPLAY_WIDTH,
+    right: tempoIncrementBounds.left - HEADER_TEMPO_BUTTON_GAP,
     bottom: playButtonBounds.bottom,
   };
 
-  const downloadButtonBounds: BoundingBox = {
-    left: tempoDisplayBounds.right + CONTROL_GAP,
+  const tempoDecrementBounds: BoundingBox = {
+    left: tempoDisplayBounds.left - HEADER_TEMPO_BUTTON_GAP - TEMPO_BUTTON_SIZE,
     top: playButtonBounds.top,
-    right: tempoDisplayBounds.right + CONTROL_GAP + DOWNLOAD_BUTTON_SIZE,
+    right: tempoDisplayBounds.left - HEADER_TEMPO_BUTTON_GAP,
+    bottom: playButtonBounds.bottom,
+  };
+
+  const tapTempoButtonBounds: BoundingBox = {
+    left: tempoDecrementBounds.left - HEADER_TAP_TEMPO_GAP - TAP_TEMPO_BUTTON_WIDTH,
+    top: playButtonBounds.top,
+    right: tempoDecrementBounds.left - HEADER_TAP_TEMPO_GAP,
+    bottom: playButtonBounds.bottom,
+  };
+
+  const headerTextBounds: BoundingBox = {
+    left: toggleModeBounds.right + HEADER_TEXT_GAP,
+    top: playButtonBounds.top,
+    right: tapTempoButtonBounds.left - CONTROL_GAP,
     bottom: playButtonBounds.bottom,
   };
 
@@ -283,7 +293,9 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     playButtonBounds,
     toggleModeBounds,
     headerTextBounds,
+    tempoDecrementBounds,
     tempoDisplayBounds,
+    tempoIncrementBounds,
     tapTempoButtonBounds,
     downloadButtonBounds,
     exportMenuBounds,
@@ -361,6 +373,8 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
   const controlBounds = [
     getMidiPaddedControlBounds(layout.playButtonBounds),
     getMidiPaddedControlBounds(layout.toggleModeBounds),
+    getMidiPaddedControlBounds(layout.tempoDecrementBounds),
+    getMidiPaddedControlBounds(layout.tempoIncrementBounds),
     getMidiPaddedControlBounds(layout.tapTempoButtonBounds),
     getMidiPaddedControlBounds(layout.downloadButtonBounds),
     getMidiPaddedControlBounds(layout.addLaneBounds),

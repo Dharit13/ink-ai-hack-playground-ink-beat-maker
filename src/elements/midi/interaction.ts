@@ -20,8 +20,11 @@ import {
   createMidiLane,
   getMidiHeightForLaneCount,
   MIDI_AUTOMATION_MIN_HEIGHT,
+  MIDI_MAX_TEMPO,
   MIDI_LANE_INSTRUMENTS,
+  MIDI_MIN_TEMPO,
   MIDI_MIN_HEIGHT,
+  MIDI_TEMPO_STEP,
   normalizeMidiElement,
 } from './types';
 import { exportWavFile } from './audioExport';
@@ -34,12 +37,13 @@ const TAP_TEMPO_MIN_INTERVAL_MS = 250;
 const TAP_TEMPO_MAX_INTERVAL_MS = 1500;
 const TAP_TEMPO_MIN_TAPS = 2;
 const TAP_TEMPO_MAX_INTERVAL_SAMPLES = 4;
-const TAP_TEMPO_MIN_BPM = 40;
-const TAP_TEMPO_MAX_BPM = 240;
 
 const tapTempoHistory = new Map<string, number[]>();
 
+export type MidiTempoTapTarget = 'decrementTempo' | 'incrementTempo';
+
 type MidiTapTarget =
+  | { kind: MidiTempoTapTarget }
   | { kind: 'tapTempo' }
   | { kind: 'play' }
   | { kind: 'toggleMode' }
@@ -205,11 +209,55 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function clampTempo(tempo: number): number {
+  return clamp(Math.round(tempo), MIDI_MIN_TEMPO, MIDI_MAX_TEMPO);
+}
+
 function clampPointToBounds(point: Offset, bounds: BoundingBox): Offset {
   return {
     x: clamp(point.x, bounds.left, bounds.right - Number.EPSILON),
     y: clamp(point.y, bounds.top, bounds.bottom - Number.EPSILON),
   };
+}
+
+export function adjustTempo(element: MidiElement, delta: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return {
+    ...normalized,
+    tempo: clampTempo(normalized.tempo + delta),
+  };
+}
+
+export function applyTempoTapTarget(
+  element: MidiElement,
+  target: MidiTempoTapTarget
+): MidiElement {
+  return adjustTempo(
+    element,
+    target === 'decrementTempo' ? -MIDI_TEMPO_STEP : MIDI_TEMPO_STEP
+  );
+}
+
+export function getMidiTempoControlBounds(
+  element: MidiElement,
+  target: MidiTempoTapTarget
+): BoundingBox {
+  const layout = getMidiLayout(normalizeMidiElement(element));
+  return target === 'decrementTempo'
+    ? layout.tempoDecrementBounds
+    : layout.tempoIncrementBounds;
+}
+
+export function resolveMidiTempoTapTarget(
+  element: MidiElement,
+  center: Offset
+): MidiTempoTapTarget | null {
+  const tapTarget = resolveMidiTapTarget(element, center);
+  if (tapTarget?.kind === 'decrementTempo' || tapTarget?.kind === 'incrementTempo') {
+    return tapTarget.kind;
+  }
+
+  return null;
 }
 
 function applyTapTempo(element: MidiElement, tapTime: number): MidiElement {
@@ -236,11 +284,7 @@ function applyTapTempo(element: MidiElement, tapTime: number): MidiElement {
 
   const intervals = taps.slice(1).map((value, index) => value - taps[index]);
   const averageInterval = intervals.reduce((sum, value) => sum + value, 0) / intervals.length;
-  const nextTempo = clamp(
-    Math.round(60000 / averageInterval),
-    TAP_TEMPO_MIN_BPM,
-    TAP_TEMPO_MAX_BPM
-  );
+  const nextTempo = clampTempo(60000 / averageInterval);
 
   return {
     ...element,
@@ -494,6 +538,14 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
 
       return { kind: 'exportMenuSurface' };
     }
+  }
+
+  if (pointInControlBounds(center, layout.tempoDecrementBounds)) {
+    return { kind: 'decrementTempo' };
+  }
+
+  if (pointInControlBounds(center, layout.tempoIncrementBounds)) {
+    return { kind: 'incrementTempo' };
   }
 
   if (pointInControlBounds(center, layout.tapTempoButtonBounds)) {
@@ -783,6 +835,13 @@ export async function acceptInk(
 
     if (tapTarget && canUseTapTarget) {
       switch (tapTarget.kind) {
+        case 'decrementTempo':
+        case 'incrementTempo':
+          return {
+            element: applyTempoTapTarget(normalized, tapTarget.kind),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
         case 'tapTempo':
           return {
             element: applyTapTempo(normalized, Date.now()),

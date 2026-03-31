@@ -195,7 +195,9 @@ export function render(
 
   renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
   renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
+  renderTempoAdjustButton(ctx, rc, layout.tempoDecrementBounds, '-', seed + 11);
   renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
+  renderTempoAdjustButton(ctx, rc, layout.tempoIncrementBounds, '+', seed + 12);
   renderTapTempoButton(ctx, rc, layout.tapTempoButtonBounds, seed);
   renderDownloadButton(ctx, rc, layout.downloadButtonBounds, normalized.exportMenuOpen, seed);
 
@@ -286,6 +288,30 @@ function renderTempoDisplay(
   applyHeaderMetaTextStyle(ctx);
   ctx.textAlign = 'center';
   ctx.fillText(`${tempo} BPM`, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
+  ctx.restore();
+}
+
+function renderTempoAdjustButton(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  label: '+' | '-',
+  seed: number
+): void {
+  ctx.save();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    sketchButtonIdle(seed)
+  );
+
+  ctx.fillStyle = '#2f3b52';
+  ctx.font = 'bold 19px "Caveat", cursive';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
   ctx.restore();
 }
 

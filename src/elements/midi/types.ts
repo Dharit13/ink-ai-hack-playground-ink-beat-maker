@@ -55,6 +55,9 @@ export interface MidiElement extends TransformableElement {
 
 export const DEFAULT_MIDI_STEPS = 16;
 export const DEFAULT_MIDI_TEMPO = 120;
+export const MIDI_TEMPO_STEP = 1;
+export const MIDI_MIN_TEMPO = 40;
+export const MIDI_MAX_TEMPO = 240;
 export const MIDI_MIN_WIDTH = 520;
 export const MIDI_MIN_HEIGHT = 132;
 export const MIDI_AUTOMATION_MIN_HEIGHT = 80;
