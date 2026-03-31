@@ -16,6 +16,7 @@ import {
 import { primeMidiAudio } from './renderer';
 import { exportMidiFile } from './midiExport';
 import {
+  clampMidiWidth,
   clampExportLoopCount,
   createMidiLane,
   getMidiHeightForLaneCount,
@@ -30,7 +31,6 @@ import {
 import { exportWavFile } from './audioExport';
 
 const TAP_DISTANCE_THRESHOLD = 12;
-const MIN_MIDI_WIDTH = 320;
 const MENU_ROW_HEIGHT = 22;
 const TAP_TEMPO_IDLE_RESET_MS = 2500;
 const TAP_TEMPO_MIN_INTERVAL_MS = 250;
@@ -1228,7 +1228,7 @@ export function onHandleDrag(
   const left = normalized.transform.values[6];
   return {
     ...normalized,
-    width: Math.max(MIN_MIDI_WIDTH, point.x - left),
+    width: clampMidiWidth(point.x - left),
     openInstrumentLaneId: null,
   };
 }

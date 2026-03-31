@@ -26,6 +26,7 @@ export interface MidiLayout {
   playButtonBounds: BoundingBox;
   toggleModeBounds: BoundingBox;
   headerTextBounds: BoundingBox;
+  tempoGroupBounds: BoundingBox;
   tempoDecrementBounds: BoundingBox;
   tempoDisplayBounds: BoundingBox;
   tempoIncrementBounds: BoundingBox;
@@ -56,8 +57,11 @@ const TEMPO_DISPLAY_WIDTH = 58;
 const TEMPO_BUTTON_SIZE = 24;
 const TAP_TEMPO_BUTTON_WIDTH = 74;
 const DOWNLOAD_BUTTON_SIZE = 24;
-const HEADER_TAP_TEMPO_GAP = 6;
 const HEADER_TEMPO_BUTTON_GAP = 6;
+const TEMPO_GROUP_TAP_TEMPO_GAP = 12;
+const TEMPO_GROUP_OUTER_PADDING = 4;
+const TEMPO_GROUP_VERTICAL_INSET = 2;
+const TEMPO_GROUP_DOWNLOAD_GAP = 30;
 const HEADER_TEXT_GAP = 16;
 export const MIDI_CONTROL_TAP_PADDING = 6;
 export const MIDI_STEP_GRID_TAP_PADDING = 4;
@@ -119,9 +123,9 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   };
 
   const tempoIncrementBounds: BoundingBox = {
-    left: downloadButtonBounds.left - CONTROL_GAP - TEMPO_BUTTON_SIZE,
+    left: downloadButtonBounds.left - TEMPO_GROUP_DOWNLOAD_GAP - TEMPO_BUTTON_SIZE,
     top: playButtonBounds.top,
-    right: downloadButtonBounds.left - CONTROL_GAP,
+    right: downloadButtonBounds.left - TEMPO_GROUP_DOWNLOAD_GAP,
     bottom: playButtonBounds.bottom,
   };
 
@@ -139,10 +143,17 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     bottom: playButtonBounds.bottom,
   };
 
+  const tempoGroupBounds: BoundingBox = {
+    left: tempoDecrementBounds.left - TEMPO_GROUP_OUTER_PADDING,
+    top: playButtonBounds.top + TEMPO_GROUP_VERTICAL_INSET,
+    right: tempoIncrementBounds.right + TEMPO_GROUP_OUTER_PADDING,
+    bottom: playButtonBounds.bottom - TEMPO_GROUP_VERTICAL_INSET,
+  };
+
   const tapTempoButtonBounds: BoundingBox = {
-    left: tempoDecrementBounds.left - HEADER_TAP_TEMPO_GAP - TAP_TEMPO_BUTTON_WIDTH,
+    left: tempoDecrementBounds.left - TEMPO_GROUP_TAP_TEMPO_GAP - TAP_TEMPO_BUTTON_WIDTH,
     top: playButtonBounds.top,
-    right: tempoDecrementBounds.left - HEADER_TAP_TEMPO_GAP,
+    right: tempoDecrementBounds.left - TEMPO_GROUP_TAP_TEMPO_GAP,
     bottom: playButtonBounds.bottom,
   };
 
@@ -293,6 +304,7 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     playButtonBounds,
     toggleModeBounds,
     headerTextBounds,
+    tempoGroupBounds,
     tempoDecrementBounds,
     tempoDisplayBounds,
     tempoIncrementBounds,

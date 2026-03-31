@@ -186,15 +186,16 @@ export function render(
   ctx.shadowBlur = 0;
 
   applyHeaderMetaTextStyle(ctx);
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'center';
   ctx.fillText(
     `${normalized.steps} Steps · ${normalized.lanes.length} Lane${normalized.lanes.length === 1 ? '' : 's'}`,
-    layout.headerTextBounds.left,
+    layout.headerTextBounds.left + (layout.headerTextBounds.right - layout.headerTextBounds.left) * 0.42,
     (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
   );
 
   renderPlayButton(ctx, rc, layout.playButtonBounds, normalized.isLooping, seed);
   renderModeToggle(ctx, rc, layout.toggleModeBounds, normalized.inputMode, seed);
+  renderTempoGroup(ctx, rc, layout, seed + 10);
   renderTempoAdjustButton(ctx, rc, layout.tempoDecrementBounds, '-', seed + 11);
   renderTempoDisplay(ctx, layout.tempoDisplayBounds, normalized.tempo);
   renderTempoAdjustButton(ctx, rc, layout.tempoIncrementBounds, '+', seed + 12);
@@ -291,28 +292,55 @@ function renderTempoDisplay(
   ctx.restore();
 }
 
-function renderTempoAdjustButton(
+function renderTempoGroup(
   ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  layout: ReturnType<typeof getMidiLayout>,
+  seed: number
+): void {
+  const group = layout.tempoGroupBounds;
+
+  ctx.save();
+  rc.rectangle(
+    group.left,
+    group.top,
+    group.right - group.left,
+    group.bottom - group.top,
+    sketchButtonIdle(seed)
+  );
+  ctx.restore();
+}
+
+function renderTempoAdjustButton(
+  _ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
   label: '+' | '-',
   seed: number
 ): void {
-  ctx.save();
-  rc.rectangle(
-    bounds.left,
-    bounds.top,
-    bounds.right - bounds.left,
-    bounds.bottom - bounds.top,
-    sketchButtonIdle(seed)
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  const halfHorizontal = Math.min(6, (bounds.right - bounds.left) * 0.24);
+  const halfVertical = Math.min(6, (bounds.bottom - bounds.top) * 0.24);
+  const lineStyle = sketchTickLine('#2f3b52', 2.2, seed + 1);
+
+  rc.line(
+    centerX - halfHorizontal,
+    centerY + 0.4,
+    centerX + halfHorizontal,
+    centerY - 0.3,
+    lineStyle
   );
 
-  ctx.fillStyle = '#2f3b52';
-  ctx.font = 'bold 19px "Caveat", cursive';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2 + 1);
-  ctx.restore();
+  if (label === '+') {
+    rc.line(
+      centerX - 0.2,
+      centerY - halfVertical,
+      centerX + 0.3,
+      centerY + halfVertical,
+      sketchTickLine('#2f3b52', 2.2, seed + 2)
+    );
+  }
 }
 
 function renderTapTempoButton(
@@ -417,16 +445,15 @@ function renderLane(
     }
   );
 
-  ctx.fillStyle = accentColor;
-  ctx.beginPath();
-  ctx.roundRect(
-    laneLayout.instrumentBounds.left + 6,
-    laneLayout.instrumentBounds.top + 6,
-    6,
-    laneLayout.instrumentBounds.bottom - laneLayout.instrumentBounds.top - 12,
-    4
+  const accentLineX = laneLayout.instrumentBounds.left + 9;
+  const accentLineInsetY = 10;
+  rc.line(
+    accentLineX,
+    laneLayout.instrumentBounds.top + accentLineInsetY,
+    accentLineX,
+    laneLayout.instrumentBounds.bottom - accentLineInsetY,
+    sketchTickLine(accentColor, 7, seed + laneLayout.laneIndex * 37 + 3)
   );
-  ctx.fill();
 
   ctx.fillStyle = '#2f3b52';
   ctx.textAlign = 'left';

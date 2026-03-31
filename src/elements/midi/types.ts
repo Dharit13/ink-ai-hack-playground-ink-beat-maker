@@ -130,10 +130,15 @@ export function getMidiHeightForLaneCount(laneCount: number): number {
   );
 }
 
+export function clampMidiWidth(width: number): number {
+  return Math.max(MIDI_MIN_WIDTH, width);
+}
+
 export function normalizeMidiElement(element: MidiElement): MidiElement {
   if (element.lanes && element.lanes.length > 0) {
     return {
       ...element,
+      width: clampMidiWidth(element.width),
       lanes: element.lanes.map((lane) => ({
         ...lane,
         activeSteps: ensureStepLength(lane.activeSteps, element.steps),
@@ -162,6 +167,7 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
 
   return {
     ...element,
+    width: clampMidiWidth(element.width),
     lanes: [legacyLane],
     height: getMidiHeightForLaneCount(1),
     inputMode: element.inputMode ?? 'tap',
@@ -238,7 +244,7 @@ function getAutomationHasData(element: MidiElement): boolean {
 
 export function createMidiElement(bounds: BoundingBox): MidiElement {
   const laneCount = 1;
-  const width = Math.max(MIDI_MIN_WIDTH, bounds.right - bounds.left);
+  const width = clampMidiWidth(bounds.right - bounds.left);
   const height = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(laneCount));
 
   return {
