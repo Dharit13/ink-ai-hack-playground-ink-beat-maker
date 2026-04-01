@@ -23,7 +23,6 @@ import {
 } from './types';
 import {
   createMidiOutputNode,
-  getStepDurationSeconds,
   getStepVelocity,
   scheduleLaneSoundAtTime,
 } from './audio';
@@ -32,6 +31,7 @@ import { isMidiFontReady } from './font';
 interface PlaybackRuntimeState {
   startedAt: number;
   lastTriggeredStep: number;
+  tempo: number;
 }
 
 const playbackState = new Map<string, PlaybackRuntimeState>();
@@ -85,16 +85,48 @@ function playLaneSound(instrument: MidiInstrument, velocity: ReturnType<typeof g
   );
 }
 
+function getStepDurationMsForTempo(tempo: number): number {
+  return (60 / tempo / 4) * 1000;
+}
+
 function getStepDurationMs(element: MidiElement): number {
-  return getStepDurationSeconds(element) * 1000;
+  return getStepDurationMsForTempo(normalizeMidiElement(element).tempo);
+}
+
+function getElapsedPlaybackSteps(runtime: PlaybackRuntimeState, now: number): number {
+  const elapsed = Math.max(0, now - runtime.startedAt);
+  return elapsed / getStepDurationMsForTempo(runtime.tempo);
+}
+
+function getLoopedStepProgress(stepProgress: number, steps: number): number {
+  if (!Number.isFinite(stepProgress) || steps <= 0) {
+    return 0;
+  }
+
+  const loopedProgress = stepProgress % steps;
+  return loopedProgress < 0 ? loopedProgress + steps : loopedProgress;
 }
 
 function getCurrentStepIndex(element: MidiElement, now: number): number {
   const runtime = playbackState.get(element.id);
   if (!runtime) return 0;
 
-  const elapsed = Math.max(0, now - runtime.startedAt);
-  return Math.floor(elapsed / getStepDurationMs(element)) % normalizeMidiElement(element).steps;
+  const normalized = normalizeMidiElement(element);
+  return Math.floor(getLoopedStepProgress(getElapsedPlaybackSteps(runtime, now), normalized.steps));
+}
+
+function rebasePlaybackRuntime(runtime: PlaybackRuntimeState, element: MidiElement, now: number): void {
+  const normalized = normalizeMidiElement(element);
+  if (runtime.tempo === normalized.tempo) {
+    return;
+  }
+
+  const preservedStepProgress = getLoopedStepProgress(
+    getElapsedPlaybackSteps(runtime, now),
+    normalized.steps
+  );
+  runtime.startedAt = now - preservedStepProgress * getStepDurationMs(normalized);
+  runtime.tempo = normalized.tempo;
 }
 
 function syncPlayback(element: MidiElement, now: number): number | null {
@@ -107,8 +139,10 @@ function syncPlayback(element: MidiElement, now: number): number | null {
   const runtime = playbackState.get(normalized.id) ?? {
     startedAt: now,
     lastTriggeredStep: -1,
+    tempo: normalized.tempo,
   };
   playbackState.set(normalized.id, runtime);
+  rebasePlaybackRuntime(runtime, normalized, now);
 
   const stepIndex = getCurrentStepIndex(normalized, now);
   if (stepIndex !== runtime.lastTriggeredStep) {
