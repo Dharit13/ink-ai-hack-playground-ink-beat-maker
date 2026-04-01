@@ -1,4 +1,5 @@
 import { buildDruminkExportBaseName } from './exportFileName';
+import { clampExportLoopCount, normalizeMidiElement } from './types';
 import type { MidiElement, MidiInstrument, MidiLane, StepVelocity } from './types';
 
 const TICKS_PER_QUARTER = 480;
@@ -54,6 +55,7 @@ function buildLaneTrackEvents(
   element: MidiElement,
   lane: MidiLane,
   isFirstTrack: boolean,
+  loopCount: number,
   applyAutomation: boolean
 ): number[] {
   const events: number[] = [];
@@ -72,37 +74,41 @@ function buildLaneTrackEvents(
   const note = GM_NOTE[lane.instrument] ?? 38;
   const noteOnStatus = 0x90 | PERCUSSION_CHANNEL;
   const noteOffStatus = 0x80 | PERCUSSION_CHANNEL;
+  const patternLengthTicks = element.steps * TICKS_PER_STEP;
 
   let currentTick = 0;
 
-  for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
-    const stepStartTick = stepIndex * TICKS_PER_STEP;
+  for (let loopIndex = 0; loopIndex < loopCount; loopIndex++) {
+    const loopStartTick = loopIndex * patternLengthTicks;
 
-    let velocityValue = 0;
-    if (mode === 'tick') {
-      velocityValue = VELOCITY_VALUE[lane.stepVelocities[stepIndex]];
-    } else {
-      if (lane.activeSteps[stepIndex]) {
-        const vel = lane.stepVelocities[stepIndex] !== 'off' ? lane.stepVelocities[stepIndex] : 'normal';
+    for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
+      const stepStartTick = loopStartTick + stepIndex * TICKS_PER_STEP;
+
+      let velocityValue = 0;
+      if (mode === 'tick') {
+        velocityValue = VELOCITY_VALUE[lane.stepVelocities[stepIndex]];
+      } else if (lane.activeSteps[stepIndex]) {
+        const vel =
+          lane.stepVelocities[stepIndex] !== 'off' ? lane.stepVelocities[stepIndex] : 'normal';
         velocityValue = VELOCITY_VALUE[vel];
       }
-    }
 
-    // Scale by automation volume if enabled
-    if (velocityValue > 0 && applyAutomation && element.automationEnabled) {
-      const vol = element.stepVolumes?.[stepIndex] ?? 1.0;
-      velocityValue = Math.max(1, Math.round(velocityValue * vol));
-    }
+      // Scale by automation volume if enabled.
+      if (velocityValue > 0 && applyAutomation && element.automationEnabled) {
+        const vol = element.stepVolumes?.[stepIndex] ?? 1.0;
+        velocityValue = Math.max(1, Math.round(velocityValue * vol));
+      }
 
-    if (velocityValue > 0) {
-      const deltaOn = stepStartTick - currentTick;
-      events.push(...writeVarLen(deltaOn), noteOnStatus, note, velocityValue);
-      currentTick = stepStartTick;
+      if (velocityValue > 0) {
+        const deltaOn = stepStartTick - currentTick;
+        events.push(...writeVarLen(deltaOn), noteOnStatus, note, velocityValue);
+        currentTick = stepStartTick;
 
-      const noteOffTick = stepStartTick + TICKS_PER_STEP - 10;
-      const deltaOff = noteOffTick - currentTick;
-      events.push(...writeVarLen(deltaOff), noteOffStatus, note, 0);
-      currentTick = noteOffTick;
+        const noteOffTick = stepStartTick + TICKS_PER_STEP - 10;
+        const deltaOff = noteOffTick - currentTick;
+        events.push(...writeVarLen(deltaOff), noteOffStatus, note, 0);
+        currentTick = noteOffTick;
+      }
     }
   }
 
@@ -111,9 +117,11 @@ function buildLaneTrackEvents(
   return events;
 }
 
-function buildMidiFile(element: MidiElement, applyAutomation = true): Uint8Array {
-  const trackChunks: number[][] = element.lanes.map((lane, i) => {
-    const events = buildLaneTrackEvents(element, lane, i === 0, applyAutomation);
+function buildMidiFile(element: MidiElement, loopCount = 1, applyAutomation = true): Uint8Array {
+  const normalized = normalizeMidiElement(element);
+  const safeLoopCount = clampExportLoopCount(loopCount);
+  const trackChunks: number[][] = normalized.lanes.map((lane, i) => {
+    const events = buildLaneTrackEvents(normalized, lane, i === 0, safeLoopCount, applyAutomation);
     return [
       0x4d, 0x54, 0x72, 0x6b, // MTrk
       ...writeUint32BE(events.length),
@@ -133,8 +141,12 @@ function buildMidiFile(element: MidiElement, applyAutomation = true): Uint8Array
   return new Uint8Array([...header, ...trackChunks.flat()]);
 }
 
-export function exportMidiFile(element: MidiElement, applyAutomation = true): void {
-  const bytes = buildMidiFile(element, applyAutomation);
+export function exportMidiFile(
+  element: MidiElement,
+  loopCount = 1,
+  applyAutomation = true
+): void {
+  const bytes = buildMidiFile(element, loopCount, applyAutomation);
   const blob = new Blob([bytes], { type: 'audio/midi' });
   const url = URL.createObjectURL(blob);
   const fileName = `${buildDruminkExportBaseName()}.mid`;

@@ -898,7 +898,11 @@ export async function acceptInk(
             strokesConsumed: strokes,
           };
         case 'exportMidi':
-          exportMidiFile(normalized, normalized.selectedExportApplyAutomation ?? true);
+          exportMidiFile(
+            normalized,
+            normalized.selectedExportLoopCount,
+            normalized.selectedExportApplyAutomation ?? true
+          );
           return {
             element: normalized,
             consumed: true,
