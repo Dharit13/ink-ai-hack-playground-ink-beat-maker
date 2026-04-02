@@ -403,10 +403,20 @@ function renderTempoAdjustButton(
   label: '+' | '-',
   seed: number
 ): void {
+  renderAdjustGlyph(rc, bounds, label, seed, 1);
+}
+
+function renderAdjustGlyph(
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  label: '+' | '-',
+  seed: number,
+  scale: number
+): void {
   const centerX = (bounds.left + bounds.right) / 2;
   const centerY = (bounds.top + bounds.bottom) / 2;
-  const halfHorizontal = Math.min(6, (bounds.right - bounds.left) * 0.24);
-  const halfVertical = Math.min(6, (bounds.bottom - bounds.top) * 0.24);
+  const halfHorizontal = Math.min(6, (bounds.right - bounds.left) * 0.24) * scale;
+  const halfVertical = Math.min(6, (bounds.bottom - bounds.top) * 0.24) * scale;
   const lineStyle = sketchTickLine('#2f3b52', 2.2, seed + 1);
 
   rc.line(
@@ -584,14 +594,13 @@ function renderLane(
     textReady
   );
 
-  ctx.strokeStyle = '#64748b';
-  ctx.lineWidth = 1.5;
   const chevronY = laneLayout.instrumentBounds.top + 39;
-  ctx.beginPath();
-  ctx.moveTo(chevronX - 4, chevronY - 3);
-  ctx.lineTo(chevronX, chevronY + 1);
-  ctx.lineTo(chevronX + 4, chevronY - 3);
-  ctx.stroke();
+  renderLaneChevron(
+    rc,
+    chevronX,
+    chevronY,
+    seed + laneLayout.laneIndex * 37 + 6
+  );
 
   if (element.lanes.length > 1) {
     renderRemoveButton(ctx, rc, laneLayout.removeButtonBounds, seed + laneLayout.laneIndex * 37 + 5);
@@ -733,7 +742,7 @@ function renderSubdivisionChip(
 
   if (textReady) {
     ctx.fillStyle = subdivision === 'triplet' ? '#1d4ed8' : '#64748b';
-    ctx.font = 'bold 12px "Caveat", cursive';
+    ctx.font = 'bold 11.5px "Caveat", cursive';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
@@ -743,6 +752,42 @@ function renderSubdivisionChip(
     );
   }
   ctx.restore();
+}
+
+function renderLaneChevron(
+  rc: ReturnType<typeof getRoughCanvas>,
+  centerX: number,
+  centerY: number,
+  seed: number
+): void {
+  rc.line(
+    centerX - 4.2,
+    centerY - 3,
+    centerX - 0.2,
+    centerY + 1.1,
+    sketchTickLine('#64748b', 1.3, seed)
+  );
+  rc.line(
+    centerX - 0.3,
+    centerY + 1.1,
+    centerX + 4,
+    centerY - 2.5,
+    sketchTickLine('#64748b', 1.3, seed + 1)
+  );
+  rc.line(
+    centerX - 3.9,
+    centerY - 2.5,
+    centerX,
+    centerY + 1.4,
+    sketchTickLine('rgba(100, 116, 139, 0.45)', 1, seed + 2)
+  );
+  rc.line(
+    centerX + 0.1,
+    centerY + 1.4,
+    centerX + 3.7,
+    centerY - 2.2,
+    sketchTickLine('rgba(100, 116, 139, 0.45)', 1, seed + 3)
+  );
 }
 
 function renderAddLaneButton(
@@ -1078,12 +1123,12 @@ function renderExportActionButton(
 }
 
 function renderLoopAdjustButton(
-  ctx: CanvasRenderingContext2D,
+  _ctx: CanvasRenderingContext2D,
   rc: ReturnType<typeof getRoughCanvas>,
   bounds: BoundingBox,
   label: '+' | '-',
   seed: number,
-  textReady: boolean
+  _textReady: boolean
 ): void {
   rc.rectangle(
     bounds.left,
@@ -1092,14 +1137,7 @@ function renderLoopAdjustButton(
     bounds.bottom - bounds.top,
     sketchButtonIdle(seed)
   );
-
-  if (textReady) {
-    ctx.fillStyle = '#2f3b52';
-    ctx.font = 'bold 18px "Caveat", cursive';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, (bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2);
-  }
+  renderAdjustGlyph(rc, bounds, label, seed, 0.8);
 }
 
 function renderAutomationCurve(
