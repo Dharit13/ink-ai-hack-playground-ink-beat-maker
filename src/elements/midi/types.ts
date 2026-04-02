@@ -13,11 +13,13 @@ export type MidiInstrument =
   | 'cowbell';
 
 export type MidiInputMode = 'tap' | 'tick';
+export type MidiLaneSubdivision = 'straight' | 'triplet';
 export type StepVelocity = 'off' | 'low' | 'normal' | 'high';
 
 export interface MidiLane {
   id: string;
   instrument: MidiInstrument;
+  subdivision?: MidiLaneSubdivision;
   activeSteps: boolean[];
   stepVelocities: StepVelocity[];
 }
@@ -70,6 +72,8 @@ export const MIDI_FOOTER_GAP = 8;
 export const MIDI_BOTTOM_PADDING = 10;
 export const MIDI_EXPORT_MIN_LOOP_COUNT = 1;
 export const MIDI_EXPORT_MAX_LOOP_COUNT = 8;
+export const MIDI_DEFAULT_LANE_SUBDIVISION: MidiLaneSubdivision = 'straight';
+export const MIDI_LANE_SUBDIVISIONS: MidiLaneSubdivision[] = ['straight', 'triplet'];
 export const MIDI_LANE_INSTRUMENTS: MidiInstrument[] = [
   'snare',
   'closedHat',
@@ -106,12 +110,14 @@ export function getInstrumentLabel(instrument: MidiInstrument): string {
 }
 
 export function createMidiLane(
-  steps = DEFAULT_MIDI_STEPS,
-  instrument: MidiInstrument = 'snare'
+  instrument: MidiInstrument = 'snare',
+  subdivision: MidiLaneSubdivision = MIDI_DEFAULT_LANE_SUBDIVISION
 ): MidiLane {
+  const steps = getLaneStepCount(subdivision);
   return {
     id: generateId(),
     instrument,
+    subdivision,
     activeSteps: Array.from({ length: steps }, () => false),
     stepVelocities: Array.from({ length: steps }, () => 'off' as StepVelocity),
   };
@@ -134,22 +140,120 @@ export function clampMidiWidth(width: number): number {
   return Math.max(MIDI_MIN_WIDTH, width);
 }
 
+export function getLaneSubdivision(
+  lane: (Pick<MidiLane, 'subdivision'> & { meter?: string }) | undefined
+): MidiLaneSubdivision {
+  if (lane?.subdivision === 'triplet') {
+    return 'triplet';
+  }
+
+  if (lane?.meter === '3/4' || lane?.meter === '6/8') {
+    return 'triplet';
+  }
+
+  return MIDI_DEFAULT_LANE_SUBDIVISION;
+}
+
+export function getLaneStepCount(
+  laneOrSubdivision:
+    | (Pick<MidiLane, 'subdivision'> & { meter?: string })
+    | MidiLaneSubdivision
+): number {
+  const subdivision =
+    typeof laneOrSubdivision === 'string'
+      ? laneOrSubdivision
+      : getLaneSubdivision(laneOrSubdivision);
+  switch (subdivision) {
+    case 'straight':
+      return 16;
+    case 'triplet':
+      return 12;
+  }
+}
+
+export function getLaneStepsPerBeat(
+  laneOrSubdivision:
+    | (Pick<MidiLane, 'subdivision'> & { meter?: string })
+    | MidiLaneSubdivision
+): number {
+  const subdivision =
+    typeof laneOrSubdivision === 'string'
+      ? laneOrSubdivision
+      : getLaneSubdivision(laneOrSubdivision);
+  switch (subdivision) {
+    case 'straight':
+      return 4;
+    case 'triplet':
+      return 3;
+  }
+}
+
+export function getLaneBeatStepSpan(
+  laneOrSubdivision:
+    | (Pick<MidiLane, 'subdivision'> & { meter?: string })
+    | MidiLaneSubdivision
+): number {
+  return getLaneStepsPerBeat(laneOrSubdivision);
+}
+
+export function getNearestMappedStepIndex(
+  sourceIndex: number,
+  sourceLength: number,
+  targetLength: number
+): number {
+  if (sourceLength <= 0 || targetLength <= 0) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(
+      targetLength - 1,
+      Math.round(((sourceIndex + 0.5) / sourceLength) * targetLength - 0.5)
+    )
+  );
+}
+
+export function getMidiHeaderSummary(element: MidiElement): string {
+  const normalized = normalizeMidiElement(element);
+  const subdivisions = Array.from(
+    new Set(normalized.lanes.map((lane) => getLaneSubdivision(lane)))
+  );
+  if (subdivisions.length === 1) {
+    return `${subdivisions[0] === 'straight' ? 'Straight' : 'Triplet'} Grid`;
+  }
+
+  return 'Mixed Grid';
+}
+
 export function normalizeMidiElement(element: MidiElement): MidiElement {
   if (element.lanes && element.lanes.length > 0) {
     return {
       ...element,
       width: clampMidiWidth(element.width),
-      lanes: element.lanes.map((lane) => ({
-        ...lane,
-        activeSteps: ensureStepLength(lane.activeSteps, element.steps),
-        stepVelocities: ensureVelocityLength(lane.stepVelocities, lane.activeSteps, element.steps),
-      })),
+      steps: DEFAULT_MIDI_STEPS,
+      lanes: element.lanes.map((lane) => {
+        const legacyLane = lane as MidiLane & { meter?: string };
+        const subdivision = getLaneSubdivision(legacyLane);
+        const stepCount = getLaneStepCount(subdivision);
+
+        return {
+          ...lane,
+          subdivision,
+          activeSteps: ensureStepLength(lane.activeSteps, stepCount),
+          stepVelocities: ensureVelocityLength(
+            lane.stepVelocities,
+            lane.activeSteps,
+            stepCount
+          ),
+        };
+      }),
       height: getMidiHeightForLaneCount(element.lanes.length),
       inputMode: element.inputMode ?? 'tap',
       automationEnabled: element.automationEnabled ?? false,
       automationHeight: getAutomationHeight(element),
       automationHasData: getAutomationHasData(element),
-      stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
+      stepVolumes: resizeNumberPattern(element.stepVolumes ?? [], DEFAULT_MIDI_STEPS, 1.0),
       openInstrumentLaneId: element.openInstrumentLaneId ?? null,
       exportMenuOpen: element.exportMenuOpen ?? false,
       selectedExportLoopCount: clampExportLoopCount(element.selectedExportLoopCount),
@@ -157,24 +261,28 @@ export function normalizeMidiElement(element: MidiElement): MidiElement {
     };
   }
 
-  const legacyLane = createMidiLane(element.steps, element.instrument ?? 'snare');
-  legacyLane.activeSteps = ensureStepLength(element.activeSteps ?? [], element.steps);
+  const legacyLane = createMidiLane(element.instrument ?? 'snare');
+  legacyLane.activeSteps = ensureStepLength(
+    element.activeSteps ?? [],
+    getLaneStepCount(legacyLane)
+  );
   legacyLane.stepVelocities = ensureVelocityLength(
     element.stepVelocities ?? [],
     legacyLane.activeSteps,
-    element.steps
+    getLaneStepCount(legacyLane)
   );
 
   return {
     ...element,
     width: clampMidiWidth(element.width),
+    steps: DEFAULT_MIDI_STEPS,
     lanes: [legacyLane],
     height: getMidiHeightForLaneCount(1),
     inputMode: element.inputMode ?? 'tap',
     automationEnabled: element.automationEnabled ?? false,
     automationHeight: getAutomationHeight(element),
     automationHasData: getAutomationHasData(element),
-    stepVolumes: ensureVolumeLength(element.stepVolumes ?? [], element.steps),
+    stepVolumes: resizeNumberPattern(element.stepVolumes ?? [], DEFAULT_MIDI_STEPS, 1.0),
     openInstrumentLaneId: null,
     exportMenuOpen: false,
     selectedExportLoopCount: MIDI_EXPORT_MIN_LOOP_COUNT,
@@ -200,6 +308,24 @@ function ensureVelocityLength(
 
 function ensureVolumeLength(stepVolumes: number[], steps: number): number[] {
   return Array.from({ length: steps }, (_, index) => stepVolumes[index] ?? 1.0);
+}
+
+function resizeNumberPattern(values: number[], targetLength: number, fallback: number): number[] {
+  if (values.length === 0) {
+    return ensureVolumeLength([], targetLength);
+  }
+
+  if (values.length === targetLength) {
+    return ensureVolumeLength(values, targetLength);
+  }
+
+  return Array.from({ length: targetLength }, (_, index) => {
+    const sourceIndex = Math.max(
+      0,
+      Math.min(values.length - 1, Math.round(((index + 0.5) / targetLength) * values.length - 0.5))
+    );
+    return values[sourceIndex] ?? fallback;
+  });
 }
 
 export function clampExportLoopCount(loopCount: number | undefined): number {
@@ -256,7 +382,7 @@ export function createMidiElement(bounds: BoundingBox): MidiElement {
     width,
     height,
     steps: DEFAULT_MIDI_STEPS,
-    lanes: [createMidiLane(DEFAULT_MIDI_STEPS, 'snare')],
+    lanes: [createMidiLane('snare')],
     tempo: DEFAULT_MIDI_TEMPO,
     isLooping: false,
     inputMode: 'tap',

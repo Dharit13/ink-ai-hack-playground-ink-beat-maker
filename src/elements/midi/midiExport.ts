@@ -1,5 +1,10 @@
 import { buildDruminkExportBaseName } from './exportFileName';
-import { clampExportLoopCount, normalizeMidiElement } from './types';
+import {
+  clampExportLoopCount,
+  getLaneStepCount,
+  getNearestMappedStepIndex,
+  normalizeMidiElement,
+} from './types';
 import type { MidiElement, MidiInstrument, MidiLane, StepVelocity } from './types';
 
 const TICKS_PER_QUARTER = 480;
@@ -75,14 +80,16 @@ function buildLaneTrackEvents(
   const noteOnStatus = 0x90 | PERCUSSION_CHANNEL;
   const noteOffStatus = 0x80 | PERCUSSION_CHANNEL;
   const patternLengthTicks = element.steps * TICKS_PER_STEP;
+  const laneStepCount = getLaneStepCount(lane);
+  const laneStepTicks = patternLengthTicks / laneStepCount;
 
   let currentTick = 0;
 
   for (let loopIndex = 0; loopIndex < loopCount; loopIndex++) {
     const loopStartTick = loopIndex * patternLengthTicks;
 
-    for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
-      const stepStartTick = loopStartTick + stepIndex * TICKS_PER_STEP;
+    for (let stepIndex = 0; stepIndex < laneStepCount; stepIndex++) {
+      const stepStartTick = loopStartTick + Math.round(stepIndex * laneStepTicks);
 
       let velocityValue = 0;
       if (mode === 'tick') {
@@ -95,7 +102,12 @@ function buildLaneTrackEvents(
 
       // Scale by automation volume if enabled.
       if (velocityValue > 0 && applyAutomation && element.automationEnabled) {
-        const vol = element.stepVolumes?.[stepIndex] ?? 1.0;
+        const automationStepIndex = getNearestMappedStepIndex(
+          stepIndex,
+          laneStepCount,
+          element.steps
+        );
+        const vol = element.stepVolumes?.[automationStepIndex] ?? 1.0;
         velocityValue = Math.max(1, Math.round(velocityValue * vol));
       }
 
@@ -104,7 +116,7 @@ function buildLaneTrackEvents(
         events.push(...writeVarLen(deltaOn), noteOnStatus, note, velocityValue);
         currentTick = stepStartTick;
 
-        const noteOffTick = stepStartTick + TICKS_PER_STEP - 10;
+        const noteOffTick = stepStartTick + Math.max(1, Math.round(laneStepTicks) - 10);
         const deltaOff = noteOffTick - currentTick;
         events.push(...writeVarLen(deltaOff), noteOffStatus, note, 0);
         currentTick = noteOffTick;

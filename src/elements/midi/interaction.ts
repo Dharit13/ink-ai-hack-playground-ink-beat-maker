@@ -2,7 +2,7 @@ import type { BoundingBox, Offset, Stroke } from '../../types';
 import type { HandleDragPhase, InteractionResult } from '../registry/ElementPlugin';
 import type { HandwritingRecognitionResult } from '../../recognition/RecognitionService';
 import { getRecognitionService } from '../../recognition/RecognitionService';
-import type { MidiElement, MidiInputMode, StepVelocity } from './types';
+import type { MidiElement, MidiInputMode, MidiLane, MidiLaneSubdivision, StepVelocity } from './types';
 import { debugLog } from '../../debug/DebugLogger';
 import {
   getAutomationZoneBounds,
@@ -19,12 +19,15 @@ import {
   clampMidiWidth,
   clampExportLoopCount,
   createMidiLane,
-  getMidiHeightForLaneCount,
+  getNearestMappedStepIndex,
+  getLaneSubdivision,
+  getLaneStepCount,
+  MIDI_DEFAULT_LANE_SUBDIVISION,
   MIDI_AUTOMATION_MIN_HEIGHT,
+  MIDI_LANE_SUBDIVISIONS,
   MIDI_MAX_TEMPO,
   MIDI_LANE_INSTRUMENTS,
   MIDI_MIN_TEMPO,
-  MIDI_MIN_HEIGHT,
   MIDI_TEMPO_STEP,
   normalizeMidiElement,
 } from './types';
@@ -56,6 +59,7 @@ type MidiTapTarget =
   | { kind: 'exportWav' }
   | { kind: 'addLane' }
   | { kind: 'removeLane'; laneIndex: number }
+  | { kind: 'toggleLaneSubdivision'; laneIndex: number }
   | { kind: 'selectInstrument'; laneIndex: number; clampedCenter: Offset }
   | { kind: 'toggleInstrumentMenu'; laneIndex: number }
   | { kind: 'closeInstrumentMenu' }
@@ -298,17 +302,18 @@ function getTargetCells(
 ): Array<{ laneIndex: number; stepIndex: number }> {
   const normalized = normalizeMidiElement(element);
   const targets: Array<{ laneIndex: number; stepIndex: number }> = [];
+  const layout = getMidiLayout(normalized);
 
-  for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
-    for (let stepIndex = 0; stepIndex < normalized.steps; stepIndex++) {
-      const stepBounds = getMidiStepBounds(normalized, laneIndex, stepIndex);
+  for (const laneLayout of layout.lanes) {
+    for (let stepIndex = 0; stepIndex < laneLayout.stepCount; stepIndex++) {
+      const stepBounds = getMidiStepBounds(normalized, laneLayout.laneIndex, stepIndex);
       if (
         strokes.some((stroke) => {
           const strokeBounds = getStrokeBounds(stroke);
           return strokeBounds ? boundingBoxesOverlap(stepBounds, strokeBounds) : false;
         })
       ) {
-        targets.push({ laneIndex, stepIndex });
+        targets.push({ laneIndex: laneLayout.laneIndex, stepIndex });
       }
     }
   }
@@ -424,30 +429,88 @@ function toggleExportAutomation(element: MidiElement): MidiElement {
 function addLane(element: MidiElement): MidiElement {
   const normalized = normalizeMidiElement(element);
   const nextInstrument = MIDI_LANE_INSTRUMENTS[normalized.lanes.length % MIDI_LANE_INSTRUMENTS.length];
-  const lanes = [...normalized.lanes, createMidiLane(normalized.steps, nextInstrument)];
-  const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
-
-  return {
+  return normalizeMidiElement({
     ...normalized,
-    lanes,
-    height: nextHeight,
+    lanes: [...normalized.lanes, createMidiLane(nextInstrument)],
     openInstrumentLaneId: null,
-  };
+  });
 }
 
 function removeLane(element: MidiElement, laneIndex: number): MidiElement {
   const normalized = normalizeMidiElement(element);
   if (normalized.lanes.length <= 1) return normalized;
 
-  const lanes = normalized.lanes.filter((_, index) => index !== laneIndex);
-  const nextHeight = Math.max(MIDI_MIN_HEIGHT, getMidiHeightForLaneCount(lanes.length));
+  return normalizeMidiElement({
+    ...normalized,
+    lanes: normalized.lanes.filter((_, index) => index !== laneIndex),
+    openInstrumentLaneId: null,
+  });
+}
+
+function getNextLaneSubdivision(subdivision: MidiLaneSubdivision | undefined): MidiLaneSubdivision {
+  const current = subdivision ?? MIDI_DEFAULT_LANE_SUBDIVISION;
+  const currentIndex = MIDI_LANE_SUBDIVISIONS.indexOf(current);
+  return MIDI_LANE_SUBDIVISIONS[(currentIndex + 1) % MIDI_LANE_SUBDIVISIONS.length];
+}
+
+function remapLaneVelocities(
+  sourceVelocities: StepVelocity[],
+  sourceActiveSteps: boolean[],
+  targetLength: number
+): { activeSteps: boolean[]; stepVelocities: StepVelocity[] } {
+  const sourceLength = Math.max(sourceVelocities.length, sourceActiveSteps.length);
+  const nextActiveSteps = Array.from({ length: targetLength }, () => false);
+  const nextStepVelocities = Array.from({ length: targetLength }, () => 'off' as StepVelocity);
+
+  for (let sourceIndex = 0; sourceIndex < sourceLength; sourceIndex++) {
+    const sourceVelocity =
+      sourceVelocities[sourceIndex] ?? (sourceActiveSteps[sourceIndex] ? 'normal' : 'off');
+    const isActive = sourceActiveSteps[sourceIndex] || sourceVelocity !== 'off';
+    if (!isActive) {
+      continue;
+    }
+
+    const targetIndex = getNearestMappedStepIndex(sourceIndex, sourceLength, targetLength);
+    const velocity = sourceVelocity === 'off' ? 'normal' : sourceVelocity;
+
+    nextActiveSteps[targetIndex] = true;
+    if (
+      nextStepVelocities[targetIndex] === 'off' ||
+      (nextStepVelocities[targetIndex] === 'low' && velocity !== 'low') ||
+      (nextStepVelocities[targetIndex] === 'normal' && velocity === 'high')
+    ) {
+      nextStepVelocities[targetIndex] = velocity;
+    }
+  }
 
   return {
-    ...normalized,
-    lanes,
-    height: nextHeight,
-    openInstrumentLaneId: null,
+    activeSteps: nextActiveSteps,
+    stepVelocities: nextStepVelocities,
   };
+}
+
+function setLaneSubdivision(lane: MidiLane, subdivision: MidiLaneSubdivision): MidiLane {
+  const nextStepCount = getLaneStepCount(subdivision);
+  const remapped = remapLaneVelocities(lane.stepVelocities, lane.activeSteps, nextStepCount);
+  return {
+    ...lane,
+    subdivision,
+    activeSteps: remapped.activeSteps,
+    stepVelocities: remapped.stepVelocities,
+  };
+}
+
+function toggleLaneSubdivision(element: MidiElement, laneIndex: number): MidiElement {
+  const normalized = normalizeMidiElement(element);
+  return normalizeMidiElement({
+    ...normalized,
+    lanes: normalized.lanes.map((lane, index) =>
+      index === laneIndex
+        ? setLaneSubdivision(lane, getNextLaneSubdivision(getLaneSubdivision(lane)))
+        : lane
+    ),
+    openInstrumentLaneId: null,
+  });
 }
 
 function selectInstrumentFromMenu(
@@ -491,9 +554,9 @@ function getStepTargetFromPoint(element: MidiElement, center: Offset): MidiTapTa
 
     const clampedX = clamp(center.x, laneLayout.gridBounds.left, laneLayout.gridBounds.right - Number.EPSILON);
     const stepIndex = clamp(
-      Math.floor(((clampedX - laneLayout.gridBounds.left) / gridWidth) * normalized.steps),
+      Math.floor(((clampedX - laneLayout.gridBounds.left) / gridWidth) * laneLayout.stepCount),
       0,
-      normalized.steps - 1
+      laneLayout.stepCount - 1
     );
 
     return {
@@ -572,6 +635,15 @@ export function resolveMidiTapTarget(element: MidiElement, center: Offset): Midi
     if (pointInControlBounds(center, laneLayout.removeButtonBounds)) {
       return {
         kind: 'removeLane',
+        laneIndex: laneLayout.laneIndex,
+      };
+    }
+  }
+
+  for (const laneLayout of layout.lanes) {
+    if (pointInControlBounds(center, laneLayout.subdivisionBounds)) {
+      return {
+        kind: 'toggleLaneSubdivision',
         laneIndex: laneLayout.laneIndex,
       };
     }
@@ -928,6 +1000,12 @@ export async function acceptInk(
         case 'removeLane':
           return {
             element: removeLane(normalized, tapTarget.laneIndex),
+            consumed: true,
+            strokesConsumed: strokes,
+          };
+        case 'toggleLaneSubdivision':
+          return {
+            element: toggleLaneSubdivision(normalized, tapTarget.laneIndex),
             consumed: true,
             strokesConsumed: strokes,
           };

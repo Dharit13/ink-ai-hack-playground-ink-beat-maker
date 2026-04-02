@@ -15,9 +15,15 @@ import {
 } from './sketchUtils';
 import {
   getInstrumentLabel,
+  getLaneBeatStepSpan,
+  getLaneSubdivision,
+  getLaneStepCount,
+  getNearestMappedStepIndex,
+  getMidiHeaderSummary,
   MIDI_LANE_INSTRUMENTS,
   normalizeMidiElement,
   type MidiElement,
+  type MidiLane,
   type MidiInputMode,
   type MidiInstrument,
 } from './types';
@@ -30,7 +36,7 @@ import { isMidiFontReady } from './font';
 
 interface PlaybackRuntimeState {
   startedAt: number;
-  lastTriggeredStep: number;
+  lastTriggeredStepByLaneId: Record<string, number>;
   tempo: number;
 }
 
@@ -107,12 +113,16 @@ function getLoopedStepProgress(stepProgress: number, steps: number): number {
   return loopedProgress < 0 ? loopedProgress + steps : loopedProgress;
 }
 
-function getCurrentStepIndex(element: MidiElement, now: number): number {
-  const runtime = playbackState.get(element.id);
-  if (!runtime) return 0;
-
+function getCurrentPatternProgress(element: MidiElement, now: number): number {
   const normalized = normalizeMidiElement(element);
-  return Math.floor(getLoopedStepProgress(getElapsedPlaybackSteps(runtime, now), normalized.steps));
+  return getLoopedStepProgress(getElapsedPlaybackSteps(
+    playbackState.get(element.id) ?? {
+      startedAt: now,
+      lastTriggeredStepByLaneId: {},
+      tempo: normalized.tempo,
+    },
+    now
+  ), normalized.steps) / normalized.steps;
 }
 
 function rebasePlaybackRuntime(runtime: PlaybackRuntimeState, element: MidiElement, now: number): void {
@@ -129,6 +139,25 @@ function rebasePlaybackRuntime(runtime: PlaybackRuntimeState, element: MidiEleme
   runtime.tempo = normalized.tempo;
 }
 
+function getAutomationVolumeForLaneStep(
+  element: MidiElement,
+  lane: MidiLane,
+  laneStepIndex: number
+): number {
+  const normalized = normalizeMidiElement(element);
+  if (!normalized.automationEnabled) {
+    return 1;
+  }
+
+  const laneStepCount = getLaneStepCount(lane);
+  const globalStepIndex = getNearestMappedStepIndex(
+    laneStepIndex,
+    laneStepCount,
+    normalized.steps
+  );
+  return normalized.stepVolumes[globalStepIndex] ?? 1;
+}
+
 function syncPlayback(element: MidiElement, now: number): number | null {
   const normalized = normalizeMidiElement(element);
   if (!normalized.isLooping) {
@@ -138,25 +167,30 @@ function syncPlayback(element: MidiElement, now: number): number | null {
 
   const runtime = playbackState.get(normalized.id) ?? {
     startedAt: now,
-    lastTriggeredStep: -1,
+    lastTriggeredStepByLaneId: {},
     tempo: normalized.tempo,
   };
   playbackState.set(normalized.id, runtime);
   rebasePlaybackRuntime(runtime, normalized, now);
 
-  const stepIndex = getCurrentStepIndex(normalized, now);
-  if (stepIndex !== runtime.lastTriggeredStep) {
-    runtime.lastTriggeredStep = stepIndex;
-    for (const lane of normalized.lanes) {
-      const velocity = getStepVelocity(normalized, lane, stepIndex);
+  const progress = getCurrentPatternProgress(normalized, now);
+  for (const lane of normalized.lanes) {
+    const laneStepCount = getLaneStepCount(lane);
+    const laneStepIndex = Math.min(
+      laneStepCount - 1,
+      Math.floor(progress * laneStepCount)
+    );
+    if (runtime.lastTriggeredStepByLaneId[lane.id] !== laneStepIndex) {
+      runtime.lastTriggeredStepByLaneId[lane.id] = laneStepIndex;
+      const velocity = getStepVelocity(normalized, lane, laneStepIndex);
       if (velocity !== 'off') {
-        const volume = normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
+        const volume = getAutomationVolumeForLaneStep(normalized, lane, laneStepIndex);
         playLaneSound(lane.instrument, velocity, volume);
       }
     }
   }
 
-  return stepIndex;
+  return progress;
 }
 
 export function beginMidiRenderFrame(now: number): void {
@@ -209,7 +243,7 @@ export function render(
   seenThisFrame.add(normalized.id);
 
   const layout = getMidiLayout(normalized);
-  const currentStep = syncPlayback(normalized, currentFrameTime);
+  const currentProgress = syncPlayback(normalized, currentFrameTime);
   const seed = seedFromId(normalized.id);
   const rc = getRoughCanvas(ctx);
   const textReady = isMidiFontReady();
@@ -230,7 +264,7 @@ export function render(
     applyHeaderMetaTextStyle(ctx);
     ctx.textAlign = 'center';
     ctx.fillText(
-      `${normalized.steps} Steps · ${normalized.lanes.length} Lane${normalized.lanes.length === 1 ? '' : 's'}`,
+      getMidiHeaderSummary(normalized),
       layout.headerTextBounds.left + (layout.headerTextBounds.right - layout.headerTextBounds.left) * 0.42,
       (layout.headerTextBounds.top + layout.headerTextBounds.bottom) / 2
     );
@@ -246,7 +280,7 @@ export function render(
   renderDownloadButton(ctx, rc, layout.downloadButtonBounds, normalized.exportMenuOpen, seed);
 
   for (const laneLayout of layout.lanes) {
-    renderLane(ctx, rc, normalized, laneLayout, currentStep, normalized.inputMode, seed, textReady);
+    renderLane(ctx, rc, normalized, laneLayout, currentProgress, normalized.inputMode, seed, textReady);
   }
 
   renderAddLaneButton(ctx, rc, layout.addLaneBounds, seed, textReady);
@@ -470,17 +504,19 @@ function renderLane(
   rc: ReturnType<typeof getRoughCanvas>,
   element: MidiElement,
   laneLayout: ReturnType<typeof getMidiLayout>['lanes'][number],
-  currentStep: number | null,
+  currentProgress: number | null,
   mode: MidiInputMode,
   seed: number,
   textReady: boolean
 ): void {
   const lane = element.lanes[laneLayout.laneIndex];
+  const laneStepCount = laneLayout.stepCount;
+  const laneBeatStepSpan = getLaneBeatStepSpan(lane);
   const accentColor = getLaneAccentColor(lane.instrument);
   const stepInsetX = Math.min(8, Math.max(5, laneLayout.stepWidth * 0.14));
   const stepInsetY = Math.min(8, Math.max(5, laneLayout.stepHeight * 0.16));
   const labelX = laneLayout.instrumentBounds.left + 26;
-  const labelMaxWidth = Math.max(24, laneLayout.removeButtonBounds.left - labelX - 12);
+  const labelMaxWidth = Math.max(24, laneLayout.subdivisionBounds.left - labelX - 18);
 
   ctx.save();
 
@@ -527,10 +563,30 @@ function renderLane(
     ctx.fillText('Instrument', labelX, laneLayout.instrumentBounds.top + 38, labelMaxWidth - 18);
   }
 
+  let chevronX = laneLayout.subdivisionBounds.left - 12;
+  if (textReady) {
+    ctx.save();
+    ctx.font = '14px "Caveat", cursive';
+    const instrumentLabelWidth = ctx.measureText('Instrument').width;
+    ctx.restore();
+    chevronX = Math.min(
+      laneLayout.subdivisionBounds.left - 12,
+      labelX + instrumentLabelWidth + 10
+    );
+  }
+
+  renderSubdivisionChip(
+    ctx,
+    rc,
+    laneLayout.subdivisionBounds,
+    getLaneSubdivision(lane),
+    seed + laneLayout.laneIndex * 37 + 4,
+    textReady
+  );
+
   ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1.5;
-  const chevronX = laneLayout.removeButtonBounds.left - 16;
-  const chevronY = laneLayout.instrumentBounds.top + 38;
+  const chevronY = laneLayout.instrumentBounds.top + 39;
   ctx.beginPath();
   ctx.moveTo(chevronX - 4, chevronY - 3);
   ctx.lineTo(chevronX, chevronY + 1);
@@ -557,12 +613,19 @@ function renderLane(
     }
   );
 
-  for (let stepIndex = 0; stepIndex < element.steps; stepIndex++) {
+  const laneCurrentStep = currentProgress === null
+    ? null
+    : Math.min(
+        laneStepCount - 1,
+        Math.floor(currentProgress * laneStepCount)
+      );
+
+  for (let stepIndex = 0; stepIndex < laneStepCount; stepIndex++) {
     const x = laneLayout.gridBounds.left + stepIndex * laneLayout.stepWidth;
-    const isBarBoundary = stepIndex % 4 === 0;
+    const isBeatBoundary = stepIndex % laneBeatStepSpan === 0;
     const velocity = lane.stepVelocities[stepIndex];
 
-    if (currentStep === stepIndex) {
+    if (laneCurrentStep === stepIndex) {
       ctx.fillStyle = 'rgba(15, 118, 110, 0.10)';
       ctx.fillRect(x, laneLayout.gridBounds.top, laneLayout.stepWidth, laneLayout.stepHeight);
     }
@@ -627,16 +690,17 @@ function renderLane(
         laneLayout.gridBounds.top + 1,
         x,
         laneLayout.gridBounds.bottom - 1,
-        isBarBoundary
+        isBeatBoundary
           ? sketchGridMajor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
           : sketchGridMinor(seed + laneLayout.laneIndex * 101 + stepIndex + 220)
       );
     }
   }
 
-  if (currentStep !== null) {
+  if (currentProgress !== null) {
     const playheadX =
-      laneLayout.gridBounds.left + currentStep * laneLayout.stepWidth + laneLayout.stepWidth / 2;
+      laneLayout.gridBounds.left +
+      currentProgress * (laneLayout.gridBounds.right - laneLayout.gridBounds.left);
     ctx.strokeStyle = '#f97316';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -645,6 +709,39 @@ function renderLane(
     ctx.stroke();
   }
 
+  ctx.restore();
+}
+
+function renderSubdivisionChip(
+  ctx: CanvasRenderingContext2D,
+  rc: ReturnType<typeof getRoughCanvas>,
+  bounds: BoundingBox,
+  subdivision: 'straight' | 'triplet',
+  seed: number,
+  textReady: boolean
+): void {
+  ctx.save();
+  rc.rectangle(
+    bounds.left,
+    bounds.top,
+    bounds.right - bounds.left,
+    bounds.bottom - bounds.top,
+    subdivision === 'triplet'
+      ? sketchButtonActive('#dbeafe', seed)
+      : sketchButtonIdle(seed)
+  );
+
+  if (textReady) {
+    ctx.fillStyle = subdivision === 'triplet' ? '#1d4ed8' : '#64748b';
+    ctx.font = 'bold 12px "Caveat", cursive';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      '3 DIV',
+      (bounds.left + bounds.right) / 2,
+      (bounds.top + bounds.bottom) / 2 + 0.5
+    );
+  }
   ctx.restore();
 }
 

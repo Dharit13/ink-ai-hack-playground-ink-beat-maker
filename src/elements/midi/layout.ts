@@ -1,6 +1,7 @@
 import type { BoundingBox } from '../../types';
 import type { MidiElement } from './types';
 import {
+  getLaneStepCount,
   MIDI_ADD_BUTTON_SIZE,
   MIDI_BODY_TOP_OFFSET,
   MIDI_FOOTER_GAP,
@@ -14,9 +15,11 @@ import {
 export interface MidiLaneLayout {
   laneIndex: number;
   instrumentBounds: BoundingBox;
+  subdivisionBounds: BoundingBox;
   removeButtonBounds: BoundingBox;
   gridBounds: BoundingBox;
   instrumentMenuBounds: BoundingBox;
+  stepCount: number;
   stepWidth: number;
   stepHeight: number;
 }
@@ -49,8 +52,11 @@ const OUTER_PADDING = 10;
 const HEADER_INSET_Y = 14;
 const PLAY_BUTTON_SIZE = 24;
 const CONTROL_GAP = 12;
-const LANE_LABEL_WIDTH = 132;
+const LANE_LABEL_WIDTH = 188;
 const REMOVE_BUTTON_SIZE = 14;
+const REMOVE_BUTTON_RIGHT_INSET = 10;
+const SUBDIVISION_CHIP_WIDTH = 48;
+const SUBDIVISION_CHIP_HEIGHT = 20;
 const MENU_ROW_HEIGHT = 22;
 const TOGGLE_BUTTON_WIDTH = 50;
 const TEMPO_DISPLAY_WIDTH = 58;
@@ -243,6 +249,8 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
   }
 
   for (let laneIndex = 0; laneIndex < normalized.lanes.length; laneIndex++) {
+    const lane = normalized.lanes[laneIndex];
+    const laneStepCount = getLaneStepCount(lane);
     const laneTop = bodyTop + laneIndex * (MIDI_LANE_HEIGHT + MIDI_LANE_GAP);
     const instrumentBounds: BoundingBox = {
       left: bounds.left + OUTER_PADDING,
@@ -250,11 +258,19 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
       right: bounds.left + OUTER_PADDING + LANE_LABEL_WIDTH,
       bottom: laneTop + MIDI_LANE_HEIGHT,
     };
+    const removeButtonRight = instrumentBounds.right - REMOVE_BUTTON_RIGHT_INSET;
+    const removeButtonLeft = removeButtonRight - REMOVE_BUTTON_SIZE;
     const removeButtonBounds: BoundingBox = {
-      left: instrumentBounds.right - REMOVE_BUTTON_SIZE - 10,
+      left: removeButtonLeft,
       top: instrumentBounds.top + 10,
-      right: instrumentBounds.right - 10,
+      right: removeButtonRight,
       bottom: instrumentBounds.top + 10 + REMOVE_BUTTON_SIZE,
+    };
+    const subdivisionBounds: BoundingBox = {
+      left: removeButtonRight - SUBDIVISION_CHIP_WIDTH,
+      top: instrumentBounds.bottom - SUBDIVISION_CHIP_HEIGHT - 8,
+      right: removeButtonRight,
+      bottom: instrumentBounds.bottom - 8,
     };
     const gridBounds: BoundingBox = {
       left: instrumentBounds.right + CONTROL_GAP,
@@ -273,10 +289,12 @@ export function getMidiLayout(element: MidiElement): MidiLayout {
     lanes.push({
       laneIndex,
       instrumentBounds,
+      subdivisionBounds,
       removeButtonBounds,
       gridBounds,
       instrumentMenuBounds,
-      stepWidth: (gridBounds.right - gridBounds.left) / normalized.steps,
+      stepCount: laneStepCount,
+      stepWidth: (gridBounds.right - gridBounds.left) / laneStepCount,
       stepHeight: gridBounds.bottom - gridBounds.top,
     });
   }
@@ -392,6 +410,7 @@ export function getMidiInteractionBounds(element: MidiElement): BoundingBox {
     getMidiPaddedControlBounds(layout.addLaneBounds),
     ...layout.lanes.flatMap((lane) => [
       getMidiPaddedControlBounds(lane.instrumentBounds),
+      getMidiPaddedControlBounds(lane.subdivisionBounds),
       getMidiPaddedControlBounds(lane.removeButtonBounds),
       getMidiPaddedStepGridBounds(lane.gridBounds),
     ]),

@@ -1,5 +1,5 @@
 import type { MidiElement, MidiInstrument, MidiLane, StepVelocity } from './types';
-import { normalizeMidiElement } from './types';
+import { getLaneStepCount, getNearestMappedStepIndex, normalizeMidiElement } from './types';
 
 type MidiAudioContext = AudioContext | OfflineAudioContext;
 
@@ -279,6 +279,22 @@ export function getStepVolume(
   return applyAutomation && normalized.automationEnabled ? normalized.stepVolumes[stepIndex] ?? 1 : 1;
 }
 
+export function getLaneStepVolume(
+  element: MidiElement,
+  lane: MidiLane,
+  laneStepIndex: number,
+  applyAutomation = true
+): number {
+  const normalized = normalizeMidiElement(element);
+  const laneStepCount = getLaneStepCount(lane);
+  const automationStepIndex = getNearestMappedStepIndex(
+    laneStepIndex,
+    laneStepCount,
+    normalized.steps
+  );
+  return getStepVolume(normalized, automationStepIndex, applyAutomation);
+}
+
 export function scheduleElementPlayback(
   context: MidiAudioContext,
   outputNode: AudioNode,
@@ -288,15 +304,16 @@ export function scheduleElementPlayback(
   applyAutomation = true
 ): void {
   const normalized = normalizeMidiElement(element);
-  const stepDuration = getStepDurationSeconds(normalized);
-  const patternDuration = stepDuration * normalized.steps;
+  const patternDuration = getPatternDurationSeconds(normalized);
 
   for (let loopIndex = 0; loopIndex < loopCount; loopIndex++) {
     const loopOffset = startTime + loopIndex * patternDuration;
-    for (let stepIndex = 0; stepIndex < normalized.steps; stepIndex++) {
-      const when = loopOffset + stepIndex * stepDuration;
-      const volume = getStepVolume(normalized, stepIndex, applyAutomation);
-      for (const lane of normalized.lanes) {
+    for (const lane of normalized.lanes) {
+      const laneStepCount = getLaneStepCount(lane);
+      const laneStepDuration = patternDuration / laneStepCount;
+      for (let stepIndex = 0; stepIndex < laneStepCount; stepIndex++) {
+        const when = loopOffset + stepIndex * laneStepDuration;
+        const volume = getLaneStepVolume(normalized, lane, stepIndex, applyAutomation);
         const velocity = getStepVelocity(normalized, lane, stepIndex);
         if (velocity === 'off') continue;
         scheduleLaneSoundAtTime(
