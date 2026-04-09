@@ -1,5 +1,9 @@
 # Drumink: Ink-Based MIDI Step Sequencer
-Drumink is a MIDI step sequencer that lives directly inside the canvas. Instead of opening a DAW or reaching for an instrument, you sketch rhythms and hear them loop back immediately. The system is designed to capture musical ideas at the speed of thought through an ink-first workflow with lightweight direct controls.
+Drumink is a MIDI step sequencer that lives directly inside the canvas. Instead of opening a DAW or reaching for an instrument, you sketch rhythms and hear them loop back immediately!  
+The system is designed to capture musical ideas at the speed of thought through an ink-first workflow with lightweight direct controls.  
+
+![Drumink Demo GIF](drumink-demo.gif)
+
 ## Demo Video
 [![Watch the demo](https://img.youtube.com/vi/e3lFg2vJ6oo/0.jpg)](https://m.youtube.com/shorts/e3lFg2vJ6oo)
 ## Live Demo
@@ -7,21 +11,22 @@ Drumink is a MIDI step sequencer that lives directly inside the canvas. Instead 
 ## How to Use
 1. Open the demo.
 2. Draw a square with an X inside on the canvas.
-3. When the menu appears, select "Midi".
+3. When the menu appears, select `Midi`.
 4. Tap or draw inside the grid to build your pattern, then use the header controls to change mode, tempo, and export.
 5. Tap the play button to start the loop! Resize the block as needed
 
 **Best experienced with a tablet and stylus** (regular touch not guaranteed). Can also play on a computer with a mouse.
 ## Core Interaction Model
 - Drumink uses a mix of ink gestures and direct taps/clicks on visible controls.
-- Use the play/pause button to start or stop playback, and use `TAP` / `TICK`, tempo `-` / `+`, and `TAP TEMPO` in the header to shape how the sequencer behaves.
-- In `TAP` mode, tapping or clicking a step toggles it on and off.
-- In `TICK` mode, repeated taps on a step cycle through velocity levels, and taller vertical marks can set stronger hits.
+- Use the play/pause button to start or stop playback and tempo `-` / `+`, and `TAP TEMPO` in the header to shape how the sequencer behaves.
+- 2 different input modes:
+  - `TAP` mode: tapping or clicking a step toggles it on and off.
+  - `TICK` mode: repeated taps on a step cycle through velocity levels, and taller vertical marks can set stronger hits.
 - A horizontal strike-through across a step clears it.
 - Add or remove lanes with the lane controls, and tap an instrument label to change that lane's sound.
-- Draw below the sequencer to create an automation lane, then draw inside it to shape per-step volume.
-- Open the export menu with the download button, or by handwriting `dl` / `download` nearby, to export either `.mid` or `.wav` with loop count and optional automation.
-- Changes apply in real time while the loop is playing.
+- Draw below the sequencer to create a volume automation lane, then draw a curve inside it to shape the volume over time.
+- Open the export menu with the download button, or by handwriting `dl` / `download` nearby, to export either a `.mid` or `.wav` file with loop count and optional volume automation.
+- Changes apply in real time while the loop is playing!
 ## Features
 ### Real-Time Sequencing
 A playhead sweeps across the grid using Web Audio timing. Edits are reflected instantly without interrupting playback.
@@ -36,11 +41,13 @@ A playhead sweeps across the grid using Web Audio timing. Edits are reflected in
 ### Visual Dynamics and Automation
 - Volume and dynamics can be drawn directly.
 - Musical expression is both visible and audible.
-- Export supports both MIDI (`.mid`) and rendered audio (`.wav`).
+- Export supports both MIDI (`.mid`) and rendered audio (`.wav`).  
+
 ## Design Philosophy
 Drumink explores what happens when musical sequencing is treated as a native canvas interaction rather than a separate tool. It prioritizes speed, intuition, and tactile feedback, allowing users to sketch, hear, and refine musical ideas in a single continuous flow.
----
-# Ink Playground
+ 
+
+# For Developers: The Ink Playground
 React + TypeScript + Vite prototyping app for interactive ink-based elements with handwriting recognition.
 ## Getting Started
 ### Prerequisites
