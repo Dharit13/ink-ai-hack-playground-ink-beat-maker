@@ -2,10 +2,16 @@
 Drumink is a MIDI step sequencer that lives directly inside the canvas. Instead of opening a DAW or reaching for an instrument, you sketch rhythms and hear them loop back immediately!  
 The system is designed to capture musical ideas at the speed of thought through an ink-first workflow with lightweight direct controls.  
 
-![Drumink Demo GIF](drumink-demo.gif)
+
+<img src="drumink-demo.gif" width="400" alt="Drumink Demo GIF"/>
+
 
 ## Demo Video
-[![Watch the demo](https://img.youtube.com/vi/e3lFg2vJ6oo/0.jpg)](https://m.youtube.com/shorts/e3lFg2vJ6oo)
+
+<a href="https://m.youtube.com/shorts/e3lFg2vJ6oo">
+  <img src="https://img.youtube.com/vi/e3lFg2vJ6oo/0.jpg" width="300" alt="Watch the demo" />
+</a>
+
 ## Live Demo
 [Live Demo: Try it yourself!](https://ink-ai-hack-playground-ink-beat-mak.vercel.app/)
 ## How to Use
